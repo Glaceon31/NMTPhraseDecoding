@@ -19,6 +19,7 @@ import thumt.utils.inference as inference
 import thumt.utils.parallel as parallel
 import thumt.utils.sampling as sampling
 
+import time
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -66,7 +67,7 @@ def default_parameters():
         beam_size=4,
         decode_alpha=0.6,
         decode_length=50,
-        decode_batch_size=32,
+        decode_batch_size=1,
         # sampling
         generate_samples=False,
         num_samples=1,
@@ -310,6 +311,7 @@ def main(args):
             sess.run(init_op)
 
             while True:
+                start = time.time()
                 try:
                     feats = sess.run(features)
                     op, feed_dict = shard_features(feats, placeholders,
@@ -317,6 +319,8 @@ def main(args):
                     results.append(sess.run(op, feed_dict=feed_dict))
                     message = "Finished batch %d" % len(results)
                     tf.logging.log(tf.logging.INFO, message)
+                    end = time.time()
+                    print('time:', end-start, 's')
                 except tf.errors.OutOfRangeError:
                     break
 

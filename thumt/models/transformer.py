@@ -327,12 +327,26 @@ class Transformer(interface.NMTModel):
             else:
                 params = copy.copy(params)
 
-            with tf.variable_scope(self._scope):
+            with tf.variable_scope(self._scope, reuse=tf.AUTO_REUSE):
                 score = model_graph(features, "eval", params)
 
             return score
 
         return evaluation_fn
+
+    def get_evaluation_cache_func(self):
+        def evaluation_cache_fn(features, state, params=None):
+            if params is None:
+                params = copy.copy(self.parameters)
+            else:
+                params = copy.copy(params)
+
+            with tf.variable_scope(self._scope, reuse=tf.AUTO_REUSE):
+                score = decoding_graph(features, state, "infer", params)
+
+            return score
+
+        return evaluation_cache_fn
 
     def get_inference_func(self):
         def encoding_fn(features, params=None):
@@ -341,7 +355,7 @@ class Transformer(interface.NMTModel):
             else:
                 params = copy.copy(params)
 
-            with tf.variable_scope(self._scope):
+            with tf.variable_scope(self._scope, reuse=tf.AUTO_REUSE):
                 encoder_output = encoding_graph(features, "infer", params)
                 batch = tf.shape(encoder_output)[0]
 
@@ -363,7 +377,7 @@ class Transformer(interface.NMTModel):
             else:
                 params = copy.copy(params)
 
-            with tf.variable_scope(self._scope):
+            with tf.variable_scope(self._scope, reuse=tf.AUTO_REUSE):
                 log_prob, new_state = decoding_graph(features, state, "infer",
                                                      params)
 

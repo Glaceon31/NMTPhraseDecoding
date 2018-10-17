@@ -18,6 +18,7 @@ import thumt.models as models
 
 import numpy as np
 import math
+import time
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -256,15 +257,25 @@ def generate_new(words_src, phrases, stack, length):
     return result
 
 
+def getid_word(ivocab, word):
+    if not word in ivocab:
+        result = ivocab['<unk>']
+    else:
+        result = ivocab[word]
+    return result
+
+
 def getid(ivocab, text):
+    if text == '':
+        return [ivocab['<eos>']]
     words = text.split(' ')
-    result = []
+    result = []#[ivocab['<bos>']]
     for word in words:
         if not word in ivocab:
             result.append(ivocab['<unk>'])
         else:
             result.append(ivocab[word])
-    #result.append(ivocab['<eos>'])
+    result.append(ivocab['<eos>'])
     return result
 
 
@@ -290,11 +301,108 @@ def is_finish(cov):
     return True
 
 
+def getstate(encoderstate, num_layers):
+    result = {"layer_%d" % i: encoderstate["decoder"]["layer_%d" % i]
+              for i in range(num_layers)}
+    return result
+
+
+def merge_tensor(stack, layer):
+    result = {}
+    result["key"] = np.concatenate([stack[i][2]["layer_%d" % layer]["key"] for i in range(len(stack))])
+    result["value"] = np.concatenate([stack[i][2]["layer_%d" % layer]["value"] for i in range(len(stack))])
+    return result
+
+
+def outdims(state, num_layers):
+    result = []
+    shape = state["decoder"]["layer_0"]["key"].shape
+    for i in range(shape[0]):
+        tmp = {
+            "layer_%d" % j :{
+                "key": state["decoder"]["layer_%d" % j]["key"][i:i+1],
+                "value": state["decoder"]["layer_%d" % j]["value"][i:i+1]
+            }
+            for j in range(num_layers)}
+        result.append(tmp)
+    return result
+
+
+def update_stack(stack_current, finished, log_probs, new_state, words_src, phrases, ivocab_trg, alpha):
+    stack_new = []
+    finished_new = finished
+    for i in range(len(stack_current)):
+        tmp = stack_current[i]
+        for status in tmp[1]:
+            if status[1][0] == "limited":
+                limits = status[1][1]
+                newstatus = copy.deepcopy(status)
+                if len(limits) == 1:
+                    for j in range(status[1][-1][0], status[1][-1][1]):
+                        newstatus[0][j] = 1
+                    newstatus[1] = ["normal", "", ""]
+                else:
+                    newstatus[1][1] = ' '.join(limits[1:])
+                new = [(tmp[0]+' '+limits[0]).strip(), newstatus, new_state[i], i, float(tmp[-1]+log_probs[i][getid_word(ivocab_trg, limits[0])])]
+                if is_finish(new[1][0]):
+                    finished_new.append(to_finish(new, alpha))
+                else:
+                    stack_new.append(new)
+            else:
+                for k in phrases.keys():
+                    found = find(words_src, status[0], k)
+                    if found != -1:
+                        for p in phrases[k]:
+                            newstatus = copy.deepcopy(status)
+                            words_trg = p.split(' ')
+                            assert len(words_trg) >= 1
+                            #print('newstate', new_state)
+                            if len(words_trg) > 1:
+                                newstatus[1] = ["limited", words_trg[1:], found]
+                            else:
+                                for j in range(found[0], found[1]):
+                                    newstatus[0][j] = 1
+                            new = [(tmp[0]+' '+words_trg[0]).strip(), newstatus, new_state[i], i, float(tmp[-1]+log_probs[i][getid_word(ivocab_trg, words_trg[0])])]
+                            if is_finish(new[1][0]): 
+                                finished_new.append(to_finish(new, alpha))
+                            else:
+                                stack_new.append(new)
+     
+    return stack_new, finished_new
+'''
 def to_finish(status, alpha):
     length = len(status[0].split(' '))
     length_penalty = math.pow((5.0 + length) / 6.0, alpha)
     status[2] = status[2] / length_penalty
     return status
+'''
+def to_finish(state, alpha):
+    result = []
+    result.append(state[0])
+    length = len(state[0].split(' '))
+    length_penalty = math.pow((5.0 + length) / 6.0, alpha)
+    result.append(state[-1] / length_penalty)
+    return result
+
+def merge_duplicate(stack):
+    rid = {}
+    result = []
+    for i in range(len(stack)):
+        part = stack[i][0]
+        if rid.has_key(part):
+            rid[part].append(i)
+        else:
+            rid[part] = [i]
+            
+    for k in rid.keys():
+        tmp = stack[rid[k][0]]
+        tmp[1] = [tmp[1]]
+        for i in range(1, len(rid[k])):
+            n = stack[rid[k][i]]
+            if not n[1] in tmp[1]:
+                tmp[1] += [n[1]]
+        result.append(tmp)
+    return result
 
 
 def main(args):
@@ -325,12 +433,29 @@ def main(args):
         
         #print(features)
         score_fn = model.get_evaluation_func()
+        score_cache_fn = model.get_evaluation_cache_func()
         placeholder = {}
         placeholder["source"] = tf.placeholder(tf.int32, [None,None], "source")
         placeholder["source_length"] = tf.placeholder(tf.int32, [None], "source_length")
         placeholder["target"] = tf.placeholder(tf.int32, [None,None], "target")
         placeholder["target_length"] = tf.placeholder(tf.int32, [None], "target_length")
         scores = score_fn(placeholder, params)
+        state = {
+            "encoder": tf.placeholder(tf.float32, [None, None, params.hidden_size], "encoder"),
+            "decoder": {"layer_%d" % i: {
+                "key": tf.placeholder(tf.float32, [None, None, params.hidden_size], "decoder_key"),
+                "value": tf.placeholder(tf.float32, [None, None, params.hidden_size], "decoder_value")
+            } for i in range(params.num_decoder_layers) }
+        }
+        scores_cache = score_cache_fn(placeholder, state, params)
+
+        # create cache
+        enc_fn, dec_fn = model.get_inference_func()
+        p_enc = {}
+        p_enc["source"] = tf.placeholder(tf.int32, [None,None], "source")
+        p_enc["source_length"] = tf.placeholder(tf.int32, [None], "source_length")
+        enc = enc_fn(placeholder, params)
+        dec = dec_fn(placeholder, state, params)
 
         sess_creator = tf.train.ChiefSessionCreator(
             config=session_config(params)
@@ -382,18 +507,139 @@ def main(args):
         #print('phrases_all:', phrase_table)
 
         fout = open(args.output, 'w')
+
         for input in inputs:
+            start = time.time()
             src = copy.deepcopy(input)
             src = src.decode('utf-8')
             words = src.split(' ')
+            f_src = {}
+            f_src["source"] = [getid(ivocab_src, input) +[ivocab_src['<eos>']]]
+            f_src["source_length"] = [len(f_src["source"][0])] 
+            print('input_enc', f_src)
+            feed_src = {
+                placeholder["source"]: f_src["source"],
+                placeholder["source_length"] : f_src["source_length"]
+            }
+            encoder_state = sess.run(enc, feed_dict=feed_src)
+
             coverage = [0] * len(words)
             # generate a subset of phrase table for current translation
             phrases = subset(phrase_table, words, args.ngram)
             print('src:', repr(src))
-            #print('phrases_sub:', phrases)
+            for k in phrases.keys():
+                print(k.encode('utf-8'), len(phrases[k]))
+
+            state_init = {}
+            state_init["encoder"] = encoder_state 
+            for i in range(params.num_decoder_layers):
+                state_init["decoder"] = {}
+                state_init["decoder"]["layer_%d" % i] = np.zeros((0, params.hidden_size))
+            '''
+            stacks:
+            1. partial translation
+            2. coverage status (set), [coverage, status]
+            status (set): ['normal', '', ''] or ['limited', limited word, (left, right]] 
+            3. hidden state ({"layer_0": [...], "layer_1": [...]})
+            4. id from last stack
+            5. score
+            '''
+            stack_current = [['', [coverage, ['normal', '', '']], getstate(encoder_state, params.num_decoder_layers) , 0, 0]]
+            finished = []
+            length = 0
+
+            while True:
+                print('===',length,'===')
+                if len(stack_current) == 0:
+                    break
+                stack_current = merge_duplicate(stack_current)
+                stack_current = sorted(stack_current, key=lambda x: x[-1], reverse=True)
+                stack_current = stack_current[:params.beam_size]
+                print("new stack:", [[s[0], s[1], s[-2], s[-1]] for s in stack_current])
+
+                if len(stack_current) == 0:
+                    continue
+
+                features = get_feature(stack_current, ivocab_trg)
+                #print('encoder state size:', encoder_state)
+                features["encoder"] = np.tile(encoder_state["encoder"], (len(stack_current), 1, 1))
+                features["source"] = [getid(ivocab_src, input) +[ivocab_src['<eos>']]] * len(stack_current)
+                features["source_length"] = [len(features["source"][0])] * len(stack_current)
+                #print("features:", features)
+                features["decoder"] = {}
+                for i in range(params.num_decoder_layers):
+                    features["decoder"]["layer_%d" % i] = merge_tensor(stack_current, i)
+
+                '''
+                for k in features.keys():
+                    if type(features[k]) == list:
+                        print(k, np.asarray(features[k]).shape)
+                print("encoder", features["encoder"].shape)
+                print("decoder_key", features["decoder"]["layer_0"]["key"].shape)
+                '''
+
+                feed_dict = {
+                    placeholder['source']: features['source'],
+                    placeholder['source_length']: features['source_length'],
+                    placeholder['target']: features['target'],
+                    placeholder['target_length']: features['target_length']}
+                #if length >= 1:
+                #    scoring = sess.run(scores, feed_dict=feed_dict)
+                #    print('scores:', scoring)
+                dict_tmp={state["encoder"]: features["encoder"]}
+                feed_dict.update(dict_tmp)
+                dict_tmp={state["decoder"]["layer_%d" % i]["key"]: features["decoder"]["layer_%d" % i]["key"] for i in range(params.num_decoder_layers)}
+                feed_dict.update(dict_tmp)
+                dict_tmp={state["decoder"]["layer_%d" % i]["value"]: features["decoder"]["layer_%d" % i]["value"] for i in range(params.num_decoder_layers)}
+                feed_dict.update(dict_tmp)
+
+                log_probs, new_state = sess.run(dec, feed_dict=feed_dict)
+                new_state = outdims(new_state, params.num_decoder_layers)
+                #print("log_probs",log_probs.shape)
+                #print(log_probs[0][78], log_probs[0][406])
+                #print("state", new_state)
+
+                new_stack, finished = update_stack(stack_current, finished, log_probs, new_state, words, phrases, ivocab_trg, params.decode_alpha)
+                #print("new stack:", len(new_stack), [[s[0], s[-1]] for s in new_stack])
+                finished = sorted(finished, key=lambda x: x[-1], reverse=True)
+                finished = finished[:params.beam_size]
+                stack_current = new_stack
+                length += 1
+
+            fout.write((finished[0][0].replace(' <eos>', '').strip()+'\n').encode('utf-8'))
+            print((finished[0][0].replace(' <eos>', '').strip()).encode('utf-8'))
+
+            end = time.time()
+            print('total time:',end-start, 's')
+        exit()
+        
+        '''
+        for input in inputs:
+            src = copy.deepcopy(input)
+            src = src.decode('utf-8')
+            words = src.split(' ')
+            f_src = {}
+            f_src["source"] = [getid(ivocab_src, input) +[ivocab_src['<eos>']]]
+            f_src["source_length"] = [len(f_src["source"][0])] 
+            print(f_src)
+            feed_src = {
+                placeholder["source"]: f_src["source"],
+                placeholder["source_length"] : f_src["source_length"]
+            }
+            encoder_state = sess.run(enc, feed_dict = feed_src)
+
+            coverage = [0] * len(words)
+            # generate a subset of phrase table for current translation
+            phrases = subset(phrase_table, words, args.ngram)
+            print('src:', repr(src))
             for k in phrases.keys():
                 print(k.encode('utf-8'), len(phrases[k]))
                 
+            state_init = {}
+            state_init["encoder"] = encoder_state 
+            for i in range(params.num_decoder_layers):
+                state_init["decoder"] = {}
+                state_init["decoder"]["layer_%d" % i] = np.zeros((0, params.hidden_size))
             stacks = [[['', coverage, 0]]]
             finished = []
             length = 0
@@ -444,18 +690,8 @@ def main(args):
             fout.write((finished[0][0].replace(' <eos>', '').strip()+'\n').encode('utf-8'))
             print((finished[0][0].replace(' <eos>', '').strip()).encode('utf-8'))
             #exit()
-        '''
-        with tf.train.MonitoredSession(session_creator=sess_creator) as sess:
-            # Restore variables
-            sess.run(assign_op)
-            fd = tf.gfile.Open(args.output, "w")
-
-            while not sess.should_stop():
-                results = sess.run(scores)
-                for value in results:
-                    fd.write("%f\n" % value)
-
-            fd.close()
+        end = time.time()
+        print('total time:',end-start, 's')
         '''
 
 
