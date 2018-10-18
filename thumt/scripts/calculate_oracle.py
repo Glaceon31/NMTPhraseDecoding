@@ -143,11 +143,22 @@ def
 
 
 def insert(previous, new, refs, ngram):
+    '''
+        insert new phrase to partial translation where BLEU is maximized
+        previous: partial translation
+        new: added phrase
+        refs: [reference sentence]
+    '''
     words = previous.split(' ')
     max = 0
+    result = ''
     for i in range(0, len(words)+1):
-        
-    return 
+        tmp = ' '.join(words[:i])+' '+' '.join(words[i+1:])
+        b = bleu(tmp, refs, ngram)
+        if b > max:
+            max = b
+            result = tmp
+    return result
 
 
 def oracle(src, refs, phrases_all, ngram, beam_size): 
@@ -164,6 +175,8 @@ def oracle(src, refs, phrases_all, ngram, beam_size):
                     for p in phrase[src]:
                         current.append(insert(pre, p, refs, evaluation, ngram))
         current = [bleu(i, refs, ngram) for i in current]
+        print(current)
+        exit()
 
             
         
