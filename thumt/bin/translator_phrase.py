@@ -342,7 +342,7 @@ def update_stack(stack_current, finished, log_probs, new_state, words_src, phras
                         newstatus[0][j] = 1
                     newstatus[1] = ["normal", "", ""]
                 else:
-                    newstatus[1][1] = ' '.join(limits[1:])
+                    newstatus[1][1] = limits[1:]
                 new = [(tmp[0]+' '+limits[0]).strip(), newstatus, new_state[i], i, float(tmp[-1]+log_probs[i][getid_word(ivocab_trg, limits[0])])]
                 if is_finish(new[1][0]):
                     finished_new.append(to_finish(new, alpha))
@@ -369,13 +369,7 @@ def update_stack(stack_current, finished, log_probs, new_state, words_src, phras
                                 stack_new.append(new)
      
     return stack_new, finished_new
-'''
-def to_finish(status, alpha):
-    length = len(status[0].split(' '))
-    length_penalty = math.pow((5.0 + length) / 6.0, alpha)
-    status[2] = status[2] / length_penalty
-    return status
-'''
+
 def to_finish(state, alpha):
     result = []
     result.append(state[0])
@@ -507,8 +501,11 @@ def main(args):
         #print('phrases_all:', phrase_table)
 
         fout = open(args.output, 'w')
+        count = 0
 
         for input in inputs:
+            count += 1
+            print(count)
             start = time.time()
             src = copy.deepcopy(input)
             src = src.decode('utf-8')
@@ -516,7 +513,7 @@ def main(args):
             f_src = {}
             f_src["source"] = [getid(ivocab_src, input) +[ivocab_src['<eos>']]]
             f_src["source_length"] = [len(f_src["source"][0])] 
-            print('input_enc', f_src)
+            #print('input_enc', f_src)
             feed_src = {
                 placeholder["source"]: f_src["source"],
                 placeholder["source_length"] : f_src["source_length"]
@@ -526,9 +523,9 @@ def main(args):
             coverage = [0] * len(words)
             # generate a subset of phrase table for current translation
             phrases = subset(phrase_table, words, args.ngram)
-            print('src:', repr(src))
-            for k in phrases.keys():
-                print(k.encode('utf-8'), len(phrases[k]))
+            #print('src:', repr(src))
+            #for k in phrases.keys():
+            #    print(k.encode('utf-8'), len(phrases[k]))
 
             state_init = {}
             state_init["encoder"] = encoder_state 
@@ -549,13 +546,13 @@ def main(args):
             length = 0
 
             while True:
-                print('===',length,'===')
+                #print('===',length,'===')
                 if len(stack_current) == 0:
                     break
                 stack_current = merge_duplicate(stack_current)
                 stack_current = sorted(stack_current, key=lambda x: x[-1], reverse=True)
                 stack_current = stack_current[:params.beam_size]
-                print("new stack:", [[s[0], s[1], s[-2], s[-1]] for s in stack_current])
+                #print("new stack:", [[s[0], s[1], s[-2], s[-1]] for s in stack_current])
 
                 if len(stack_current) == 0:
                     continue
