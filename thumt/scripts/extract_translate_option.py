@@ -18,22 +18,22 @@ def parseargs():
     parser = argparse.ArgumentParser(description=msg, usage=usage)
     parser.add_argument("--input", type=str, required=True,
                         help="origin phrase-table.gz from Moses")
-    parser.add_argument("--mincount", type=int, default=5)
-    parser.add_argument("--minprob", type=float, default=0.01)
+    parser.add_argument("--num_options", type=int, default=10)
     parser.add_argument("--output", type=str, help="output path")
     
     return parser.parse_args()
 
-def valid(probs, counts, args):
-    p = probs.split(' ')
-    c = counts.split(' ')
-    p = [float(i) for i in p]
-    c = [int(float(i)) for i in c]
-    if c[0] < args.mincount or c[1] < args.mincount or c[2] < args.mincount:
-        return False
-    if p[2] < args.minprob:
-        return False
-    return True
+
+def get_options(trg_list, args):
+    result = sorted(trg_list, key=lambda x: float(x[1].split(' ')[2]), reverse=True)
+    result = result[:args.num_options]
+    result = [[i[0], float(i[1].split(' ')[2])] for i in result]
+    return result
+
+
+def rbpe(inp):
+    return inp.replace('@@ ', '')
+
 
 if __name__ == "__main__":
     args = parseargs()
@@ -43,18 +43,27 @@ if __name__ == "__main__":
         del lines[-1]
     result = {}
     count = 0
-    ok = 0
+    findmax = False
+    current_src = ''
+    current_trg = []
+    num = 0
     for line in lines:
         count += 1
         src, trg, probs, align, counts, _ = line.split(' ||| ')
-        if valid(probs, counts, args):
-            ok += 1
-            if result.has_key(src):
-                result[src].append(trg)
+        if findmax:
+            if src != current_src: 
+                result[current_src] = get_options(current_trg, args)
+                num += 1
+                findmax = False
+                current_trg = []
             else:
-                result[src] = [trg]
+                current_trg.append([trg, probs])
+        if len(rbpe(src).split(' ')) == 1 and not findmax:
+            current_src = src
+            findmax = True
+            current_trg.append([trg, probs])
         if count % 100000 == 0:
-            print(ok, '/', count)
+            print(num, '/', count)
     json.dump(result, open(args.output, 'w'))
 
 

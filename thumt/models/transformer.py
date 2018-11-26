@@ -274,6 +274,7 @@ def decoding_graph(features, state, mode, params):
     labels = features["target"]
 
     # label smoothing
+    print('smoothing', params.label_smoothing)
     ce = layers.nn.smoothed_softmax_cross_entropy_with_logits(
         logits=logits,
         labels=labels,

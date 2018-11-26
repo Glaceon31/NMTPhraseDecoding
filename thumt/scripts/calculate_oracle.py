@@ -71,7 +71,7 @@ def sentence2dict(sentence, n):
     return result
 
 
-def bleu_appro(hypo_c, refs_dict, n, hypo_dict=None):
+def bleu_appro(hypo_c, refs_dict, n, hypo_dict=None, verbose=False):
     '''
         hypo: string, one sentence per line
         refs: [string, one sentence per line]
@@ -112,10 +112,13 @@ def bleu_appro(hypo_c, refs_dict, n, hypo_dict=None):
         bleu_n[i] = correctgram_count[i]*1./ngram_count[i]
         result += math.log(bleu_n[i])/n
 
-    return math.exp(result)
+    if verbose:
+        return bleu_n, math.exp(result) 
+    else:
+        return math.exp(result)
 
 
-def bleu(hypo_c, refs_c, n, refs_dict=None, hypo_dict=None):
+def bleu(hypo_c, refs_c, n, refs_dict=None, hypo_dict=None, verbose=False):
     '''
         hypo: string, one sentence per line
         refs: [string, one sentence per line]
@@ -145,7 +148,20 @@ def bleu(hypo_c, refs_c, n, refs_dict=None, hypo_dict=None):
     bp = 1
     if hypo_length < ref_length:
         bp = math.exp(1-ref_length*1.0/hypo_length)
-    return bp * bleu_appro(hypo_c, refs_dict, n, hypo_dict=hypo_dict)
+    if verbose:
+        bleu_n, result = bleu_appro(hypo_c, refs_dict, n, hypo_dict=hypo_dict, verbose=True)
+        result = bp * result 
+        output = ''
+        for i in range(len(bleu_n)):
+            output += str(round(bleu_n[i], 2))
+            if i != len(bleu_n)-1:
+                output += '/'
+        output += ', '
+        output += str(round(bp, 2)) + ', '
+        output += str(round(result, 3))
+        return output
+    else:
+        return bp * bleu_appro(hypo_c, refs_dict, n, hypo_dict=hypo_dict)
 
 
 def num_ngram_match(hypo_c, refs_c, n, refs_dict=None):

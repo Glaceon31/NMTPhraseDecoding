@@ -31,7 +31,7 @@ def valid(probs, counts, args):
     c = [int(float(i)) for i in c]
     if c[0] < args.mincount or c[1] < args.mincount or c[2] < args.mincount:
         return False
-    if p[2] < args.minprob:
+    if p[0] < args.minprob or p[2] < args.minprob:
         return False
     return True
 
