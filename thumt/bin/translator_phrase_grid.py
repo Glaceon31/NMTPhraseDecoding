@@ -205,6 +205,38 @@ def read_files(names):
     return inputs
 
 
+def get_feature_map(stack, ivocab_trg, params):
+    features = {}
+    maps = []
+    sentence_list = []
+    stack_current = []
+    for num_cov in range(len(stack)):
+        maps.append([])
+        for idx in range(len(stack[num_cov])):
+            element = stack[num_cov][idx]
+            try:
+                pos = sentence_list.index(element[0])
+                maps[num_cov].append(pos)
+            except:
+                sentence_list.append(element[0])
+                maps[num_cov].append(len(sentence_list)-1)
+                stack_current.append(element)
+    print(sentence_list)
+    print(maps)
+    sen_ids_list = [getid(ivocab_trg, sentence) for sentence in sentence_list]
+    num_sent = len(sen_ids_list)
+    max_len = max(map(len, sen_ids_list))
+    padded_input = np.ones([num_sent, max_len], dtype=np.int32) * ivocab_trg['<pad>']
+    for i in range(num_sent):
+        padded_input[i][:len(sen_ids_list[i])] = sen_ids_list[i]
+    features["target"] = padded_input
+    features["target_length"] = [len(sen_ids) for sen_ids in sen_ids_list]
+    features["decoder"] = {}
+    for i in range(params.num_decoder_layers):
+        features["decoder"]["layer_%d" % i] = merge_tensor(stack_current, i)
+    return features, maps, len(sentence_list)
+
+
 def get_feature(sentence_list, ivocab_trg):
     features = {}
     sen_ids_list = [getid(ivocab_trg, sentence[0]) for sentence in sentence_list]
@@ -785,7 +817,6 @@ def main(args):
                 if args.verbose:
                     print('===',length,'===')
                 all_empty = True
-                neural_result = [0]*(len_src+1 )
                 for num_cov in range(0, len_src+1):
                     time_null_start = time.time()
                     if len(stacks[length][num_cov]) == 0:
@@ -801,11 +832,8 @@ def main(args):
                     for element in stacks[length][num_cov]:
                         if not can_addstack(stacks[length][num_cov+1], element[-1], params.beam_size):
                             continue
-                        # 0.043
                         for status in get_status(element, params):
-                            #status = json.loads(status_str)
                             time_st = time.time()
-                            # 0.024
                             for nullpos in get_kmax(null_order, status[0], params.beam_size):
                                 count_test[0] += 1
                                 assert status[0][nullpos] == 0
@@ -814,7 +842,6 @@ def main(args):
                                     continue
                                 count_test[1] += 1
                                 newstatus = copy.deepcopy(status)
-                                #newstatus = status
                                 newstatus[0][nullpos] = 1
                                 newstatus[2] = new_align_loss
                                 if params.keep_status_num == 1:
@@ -828,43 +855,47 @@ def main(args):
                     time_null_end = time.time()
                     time_null += time_null_end-time_null_start
 
-                    # do the neural
+                if all_empty:
+                    break
+
+                # do the neural
+                neural_result = [0]*(len_src+1)
+                features, maps, num_x = get_feature_map(stacks[length], ivocab_trg, params)
+                features["encoder"] = np.tile(encoder_state["encoder"], (num_x, 1, 1))
+                features["source"] = [getid(ivocab_src, input)] * num_x 
+                features["source_length"] = [len(features["source"][0])] * num_x 
+
+                feed_dict = {
+                    placeholder['source']: features['source'],
+                    placeholder['source_length']: features['source_length'],
+                    placeholder['target']: features['target'],
+                    placeholder['target_length']: features['target_length']}
+                dict_tmp={state["encoder"]: features["encoder"]}
+                feed_dict.update(dict_tmp)
+                dict_tmp={state["decoder"]["layer_%d" % i]["key"]: features["decoder"]["layer_%d" % i]["key"] for i in range(params.num_decoder_layers)}
+                feed_dict.update(dict_tmp)
+                dict_tmp={state["decoder"]["layer_%d" % i]["value"]: features["decoder"]["layer_%d" % i]["value"] for i in range(params.num_decoder_layers)}
+                feed_dict.update(dict_tmp)
+
+                time_bc = time.time()
+                log_probs, new_state = sess.run(dec, feed_dict=feed_dict)
+                time_c = time.time()
+                time_neural += time_c-time_bc
+                new_state = outdims(new_state, params.num_decoder_layers)
+                for num_cov in range(0, len_src+1):
+                    if len(maps[num_cov]) == 0:
+                        continue
+                    neural_result[num_cov] = [[], []]
+                    for pos in maps[num_cov]:
+                        neural_result[num_cov][0].append(log_probs[pos])
+                        neural_result[num_cov][1].append(new_state[pos])
+
+                # update the stacks
+                for num_cov in range(0, len_src+1):
+                    if neural_result[num_cov] == 0:
+                        continue
                     stack_current = stacks[length][num_cov]
-
-                    features = get_feature(stack_current, ivocab_trg)
-                    features["encoder"] = np.tile(encoder_state["encoder"], (len(stack_current), 1, 1))
-                    features["source"] = [getid(ivocab_src, input)] * len(stack_current)
-                    features["source_length"] = [len(features["source"][0])] * len(stack_current)
-                    features["decoder"] = {}
-                    for i in range(params.num_decoder_layers):
-                        features["decoder"]["layer_%d" % i] = merge_tensor(stack_current, i)
-
-                    feed_dict = {
-                        placeholder['source']: features['source'],
-                        placeholder['source_length']: features['source_length'],
-                        placeholder['target']: features['target'],
-                        placeholder['target_length']: features['target_length']}
-                    dict_tmp={state["encoder"]: features["encoder"]}
-                    feed_dict.update(dict_tmp)
-                    dict_tmp={state["decoder"]["layer_%d" % i]["key"]: features["decoder"]["layer_%d" % i]["key"] for i in range(params.num_decoder_layers)}
-                    feed_dict.update(dict_tmp)
-                    dict_tmp={state["decoder"]["layer_%d" % i]["value"]: features["decoder"]["layer_%d" % i]["value"] for i in range(params.num_decoder_layers)}
-                    feed_dict.update(dict_tmp)
-
-                    time_bc = time.time()
-                    #print('prepare neural:', time_bc-time_b, 's')
-                    log_probs, new_state = sess.run(dec, feed_dict=feed_dict)
-                    time_c = time.time()
-                    #print('neural:', time_c-time_bc, 's')
-                    time_neural += time_c-time_bc
-                    new_state = outdims(new_state, params.num_decoder_layers)
-                    #neural_result[num_cov] = [log_probs, new_state]
-
-                    # update the stacks
-                    # for num_cov in range(0, len_src+1):
-                    #if neural_result[num_cov] == 0:
-                    #    continue
-                    #log_probs, new_state = neural_result[num_cov]
+                    log_probs, new_state = neural_result[num_cov]
                     count_all = 0
                     count_canadd = 0
                     stacks = append_empty(stacks, length+1, len_src+1)
@@ -965,9 +996,9 @@ def main(args):
                     print('=',len_src, '=')
                     print_stack(stacks[length][len_src])
                     print_stack_finished(finished)
-                if all_empty:
-                    break
                 length += 1
+                #if length == 2:
+                #    exit()
 
             if params.cut_ending:
                 len_max = len(finished[0][0].split(' '))-1
