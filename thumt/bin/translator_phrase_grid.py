@@ -78,7 +78,7 @@ def default_parameters():
         num_threads=6,
         eval_batch_size=32,
         # decoding
-        beam_size=4,
+        beam_size=2,
         decode_alpha=0.6,
         # phrase specific
         bpe_phrase=True,
@@ -221,8 +221,6 @@ def get_feature_map(stack, ivocab_trg, params):
                 sentence_list.append(element[0])
                 maps[num_cov].append(len(sentence_list)-1)
                 stack_current.append(element)
-    print(sentence_list)
-    print(maps)
     sen_ids_list = [getid(ivocab_trg, sentence) for sentence in sentence_list]
     num_sent = len(sen_ids_list)
     max_len = max(map(len, sen_ids_list))
@@ -581,6 +579,37 @@ def add_stack(stack, element, beam_size, merge_status=None, max_status=1):
     return result
 
 
+def compare_candidate(a, b):
+    if a[3] > b[3]:
+        return True
+    elif a[3] == b[3]:
+        if a[4] > b[4]:
+            return True
+        else:
+            return False
+    else:
+        return False
+
+
+def add_candidite(candidate_list, new, params):
+    have_same = False
+    for i in range(len(candidate_list)):
+        if candidate_list[i][0] == new[0]:
+            if new[4] > candidate_list[i][4]:
+                candidate_list[i] = new
+                return candidate_list
+            else:
+                return candidate_list
+    if len(candidate_list) < params.beam_size:
+        candidate_list.append(new)
+    else:
+        if compare_candidate(new, candidate_list[-1]):
+            candidate_list[-1] = new
+        else:
+            return candidate_list
+    return sorted(candidate_list, key=lambda x:x[3]*1000+x[4], reverse=True)
+
+
 def get_translate_status(words_src, phrases, phrases_reverse, part, ngrams):
     '''
         output: [can_finish, word_options]
@@ -811,6 +840,7 @@ def main(args):
             time_neural = 0
             time_null = 0
             time_generate = 0
+            time_test = 0
             count_test = [0]*10
             while True:
                 # source to null
@@ -835,12 +865,12 @@ def main(args):
                         for status in get_status(element, params):
                             time_st = time.time()
                             for nullpos in get_kmax(null_order, status[0], params.beam_size):
-                                count_test[0] += 1
+                                #count_test[0] += 1
                                 assert status[0][nullpos] == 0
                                 new_align_loss = status[2]+math.log(probs_null[nullpos])
                                 if not can_addstack(stacks[length][num_cov+1], element[-1], params.beam_size, align_loss=new_align_loss):
                                     continue
-                                count_test[1] += 1
+                                #count_test[1] += 1
                                 newstatus = copy.deepcopy(status)
                                 newstatus[0][nullpos] = 1
                                 newstatus[2] = new_align_loss
@@ -851,7 +881,7 @@ def main(args):
                                 stacks[length][num_cov+1] = add_stack(stacks[length][num_cov+1], new,params.beam_size, params.merge_status, params.keep_status_num)
                                 break
                             time_ed = time.time()
-                            count_test[2] += time_ed-time_st
+                            #count_test[2] += time_ed-time_st
                     time_null_end = time.time()
                     time_null += time_null_end-time_null_start
 
@@ -896,21 +926,23 @@ def main(args):
                         continue
                     stack_current = stacks[length][num_cov]
                     log_probs, new_state = neural_result[num_cov]
-                    count_all = 0
-                    count_canadd = 0
                     stacks = append_empty(stacks, length+1, len_src+1)
                     time_c = time.time()
                     for i in range(len(stack_current)):
                         element = stack_current[i]
                         for status in get_status(element, params):
+                            count_test[2] += 1
                             #status = json.loads(status_str)
                             # limit
                             if status[1][0] == "limited":
+                                # 0.06
+                                time_ls = time.time()
+                                count_test[0] += 1
                                 limits = status[1][1]
-                                count_all += 1
                                 new_loss = float(element[-1]+log_probs[i][getid_word(ivocab_trg, limits[0])])
                                 if not can_addstack(stacks[length+1][num_cov], new_loss, params.beam_size):
                                     continue
+                                count_test[1] += 1
                                 newstatus = copy.deepcopy(status)
                                 if len(limits) == 1:
                                     newstatus[1][0] = "normal"
@@ -922,14 +954,22 @@ def main(args):
                                 else:
                                     new = [(element[0]+' '+limits[0]).strip(), {json.dumps(newstatus):1}, new_state[i], [i, 0], new_loss]
                                 stacks[length+1][num_cov] = add_stack(stacks[length+1][num_cov], new, params.beam_size, params.merge_status, params.keep_status_num)
+                                time_le = time.time()
+                            # no limitation
                             else:
+                                # candidate phrase list: list of [phrase, pos_start, pos_end, loss, align_loss]
+                                time_cs = time.time()
+                                candidate_phrase_list = []
+                                count_test[3] += 1
                                 all_covered = True
                                 for pos in range(len(status[0])):
                                     # bpe_phrase
                                     if params.bpe_phrase:
                                         # find untranslated bpe phrase
                                         pos_end = pos
-                                        while pos_end < len(words) and status[0][pos_end] == 0 and words[pos_end].endswith('@@'):
+                                        if status[0][pos_end] == 1:
+                                            continue
+                                        while pos_end+1 < len(words) and  status[0][pos_end+1] == 0 and words[pos_end].endswith('@@'):
                                             pos_end += 1
                                         if pos_end > pos:
                                             bpe_phrase = ' '.join(words[pos:pos_end+1])
@@ -937,54 +977,47 @@ def main(args):
                                             if phrases.has_key(bpe_phrase):
                                                 # start translation
                                                 for j in range(len(phrases[bpe_phrase])):
-                                                    if not type(phrases[bpe_phrase][j]) is list:
-                                                        continue
-                                                    count_all += 1
+                                                    # warning: need to build seperate candidate list for different number of covered words 
+                                                    count_test[4] += 1
                                                     phrase, prob_align = phrases[bpe_phrase][j]
                                                     words_p = phrase.split(' ')
-                                                    new_loss = float(element[-1]+log_probs[i][getid_word(ivocab_trg, words_p[0])])
-                                                    if not can_addstack(stacks[length+1][num_cov+len_bpe_phrase], new_loss, params.beam_size):
-                                                        continue
-                                                    count_canadd += 1
-                                                    newstatus = copy.deepcopy(status)
-                                                    for k in range(pos, pos_end+1):
-                                                        newstatus[0][k] = 1
-                                                    if len(words_p) > 1:
-                                                        newstatus[1] = ["limited", words_p[1:]]
-                                                    else:
-                                                        newstatus[1] = ["normal", ""]
-                                                    newstatus[2] += math.log(prob_align)
-                                                    if params.keep_status_num == 1: 
-                                                        new = [(element[0]+' '+words_p[0]).strip(), newstatus, new_state[i], [i, 0], new_loss]
-                                                    else:
-                                                        new = [(element[0]+' '+words_p[0]).strip(), {json.dumps(newstatus):1}, new_state[i], [i, 0], new_loss]
-                                                    stacks[length+1][num_cov+len_bpe_phrase] = add_stack(stacks[length+1][num_cov+len_bpe_phrase], new, params.beam_size, params.merge_status, params.keep_status_num)
+                                                    new_loss = log_probs[i][getid_word(ivocab_trg, words_p[0])]
+                                                    new_candidate = [phrase, pos, pos_end, new_loss, prob_align]
+                                                    candidate_phrase_list = add_candidite(candidate_phrase_list, new_candidate, params)
                                     #generate from source word
                                     if status[0][pos] == 0:
                                         all_covered = False
                                         num_total = len(phrases[words[pos]])
                                         for j in range(num_total):
-                                            if not type(phrases[words[pos]][j]) is list:
-                                                continue
-                                            count_all += 1
+                                            count_test[5] += 1
                                             phrase, prob_align = phrases[words[pos]][j]
                                             words_p = phrase.split(' ')
-                                            new_loss = float(element[-1]+log_probs[i][getid_word(ivocab_trg, words_p[0])])
-                                            if not can_addstack(stacks[length+1][num_cov+1], new_loss, params.beam_size):
-                                                continue
-                                            count_canadd += 1
-                                            newstatus = copy.deepcopy(status)
-                                            newstatus[0][pos] = 1
-                                            if len(words_p) > 1:
-                                                newstatus[1] = ["limited", words_p[1:]]
-                                            else:
-                                                newstatus[1] = ["normal", ""]
-                                            newstatus[2] += math.log(prob_align)
-                                            if params.keep_status_num == 1: 
-                                                new = [(element[0]+' '+words_p[0]).strip(), newstatus, new_state[i], [i, 0], new_loss]
-                                            else:
-                                                new = [(element[0]+' '+words_p[0]).strip(), {json.dumps(newstatus):1}, new_state[i], [i, 0], new_loss]
-                                            stacks[length+1][num_cov+1] = add_stack(stacks[length+1][num_cov+1], new, params.beam_size, params.merge_status, params.keep_status_num)
+                                            new_loss = log_probs[i][getid_word(ivocab_trg, words_p[0])]
+                                            new_candidate = [phrase, pos, pos, new_loss, prob_align]
+                                            candidate_phrase_list = add_candidite(candidate_phrase_list, new_candidate, params)
+                                time_ce = time.time()
+                                time_test += time_ce-time_cs
+
+                                for candidate in candidate_phrase_list:
+                                    phrase, pos, pos_end, loss, prob_align = candidate
+                                    len_covered = pos_end-pos+1
+                                    words_p = phrase.split(' ')
+                                    new_loss = float(element[-1]+loss)
+                                    if not can_addstack(stacks[length+1][num_cov+1], new_loss, params.beam_size):
+                                        break 
+                                    newstatus = copy.deepcopy(status)
+                                    for p in range(pos, pos_end+1):
+                                        newstatus[0][pos] = 1
+                                    if len(words_p) > 1:
+                                        newstatus[1] = ["limited", words_p[1:]]
+                                    else:
+                                        newstatus[1] = ["normal", ""]
+                                    newstatus[2] += math.log(prob_align)
+                                    if params.keep_status_num == 1: 
+                                        new = [(element[0]+' '+words_p[0]).strip(), newstatus, new_state[i], [i, 0], new_loss]
+                                    else:
+                                        new = [(element[0]+' '+words_p[0]).strip(), {json.dumps(newstatus):1}, new_state[i], [i, 0], new_loss]
+                                    stacks[length+1][num_cov+len_covered] = add_stack(stacks[length+1][num_cov+len_covered], new, params.beam_size, params.merge_status, params.keep_status_num)
                                 if all_covered:
                                     new_loss = float(element[-1]+log_probs[i][getid_word(ivocab_trg, '<eos>')])
                                     new = [(element[0]+' <eos>').strip(), {json.dumps(status):1}, new_state[i], i, new_loss]
@@ -1038,6 +1071,7 @@ def main(args):
                 print('time total null:', time_null, 's')
                 print('time total neural:', time_neural, 's')
                 print('time total generate:', time_generate, 's')
+                print('time total test:', time_test, 's')
                 print('time total:', end-start, 'seconds')
                 print('count:', count_test)
 
