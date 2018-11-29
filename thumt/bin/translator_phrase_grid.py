@@ -78,7 +78,7 @@ def default_parameters():
         num_threads=6,
         eval_batch_size=32,
         # decoding
-        beam_size=2,
+        beam_size=4,
         decode_alpha=0.6,
         # phrase specific
         bpe_phrase=True,
@@ -594,7 +594,7 @@ def compare_candidate(a, b):
 def add_candidite(candidate_list, new, params):
     have_same = False
     for i in range(len(candidate_list)):
-        if candidate_list[i][0] == new[0]:
+        if candidate_list[i][0].split(' ')[0] == new[0].split(' ')[0]:
             if new[4] > candidate_list[i][4]:
                 candidate_list[i] = new
                 return candidate_list
@@ -646,8 +646,8 @@ def to_finish(state, alpha):
     length_penalty = math.pow((5.0 + length) / 6.0, alpha)
     length_penalty = 1.0
     result.append(state[3])
-    result.append(state[-1] / length_penalty)
-    #result.append(state[-1] / length)
+    #result.append(state[-1] / length_penalty)
+    result.append(state[-1] / length)
     return result
 
 def merge_duplicate(stack):
@@ -846,6 +846,7 @@ def main(args):
                 # source to null
                 if args.verbose:
                     print('===',length,'===')
+                    print('== src2null ==')
                 all_empty = True
                 for num_cov in range(0, len_src+1):
                     time_null_start = time.time()
@@ -921,7 +922,9 @@ def main(args):
                         neural_result[num_cov][1].append(new_state[pos])
 
                 # update the stacks
+                print('== generation ==')
                 for num_cov in range(0, len_src+1):
+                    print('=', num_cov, '=')
                     if neural_result[num_cov] == 0:
                         continue
                     stack_current = stacks[length][num_cov]
@@ -986,6 +989,8 @@ def main(args):
                                                     candidate_phrase_list = add_candidite(candidate_phrase_list, new_candidate, params)
                                     #generate from source word
                                     if status[0][pos] == 0:
+                                        if all_covered:
+                                            print('remain:', pos, status[0])
                                         all_covered = False
                                         num_total = len(phrases[words[pos]])
                                         for j in range(num_total):
@@ -997,6 +1002,10 @@ def main(args):
                                             candidate_phrase_list = add_candidite(candidate_phrase_list, new_candidate, params)
                                 time_ce = time.time()
                                 time_test += time_ce-time_cs
+
+                                if args.verbose:
+                                    print('current:', element[0], element[1], element[-1])
+                                    print('candidates:', candidate_phrase_list)
 
                                 for candidate in candidate_phrase_list:
                                     phrase, pos, pos_end, loss, prob_align = candidate
@@ -1021,6 +1030,7 @@ def main(args):
                                 if all_covered:
                                     new_loss = float(element[-1]+log_probs[i][getid_word(ivocab_trg, '<eos>')])
                                     new = [(element[0]+' <eos>').strip(), {json.dumps(status):1}, new_state[i], i, new_loss]
+                                    print('to_finish:', new[0], new[-1])
                                     finished = add_stack(finished, to_finish(new, params.decode_alpha), params.beam_size)
 
                     time_d = time.time()
