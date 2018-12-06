@@ -43,6 +43,8 @@ def parse_args():
                         help="Name of the phrase table")
     parser.add_argument("--nullprob", type=str, required=True,
                         help="probability for source word to null")
+    parser.add_argument("--null2trg", type=str,
+                        help="vocabulary for null to target word")
     parser.add_argument("--ngram", type=int, default=4,
                         help="ngram length")
     parser.add_argument("--parameters", type=str,
@@ -80,11 +82,13 @@ def default_parameters():
         # decoding
         beam_size=4,
         decode_alpha=0.6,
+        decode_length=20,
         # phrase specific
         bpe_phrase=True,
         merge_status="max_align",
         keep_status_num=1,
         src2null_loss=True,
+        split_limited=False,
         cut_ending=False,
         cut_threshold=4.
     )
@@ -206,9 +210,10 @@ def read_files(names):
     return inputs
 
 
-def get_feature_map(stack, ivocab_trg, params):
+def get_feature_map(stack, stack_limit, ivocab_trg, params):
     features = {}
     maps = []
+    maps_limit = []
     sentence_list = []
     stack_current = []
     for num_cov in range(len(stack)):
@@ -222,6 +227,17 @@ def get_feature_map(stack, ivocab_trg, params):
                 sentence_list.append(element[0])
                 maps[num_cov].append(len(sentence_list)-1)
                 stack_current.append(element)
+    for num_cov in range(len(stack_limit)):
+        maps_limit.append([])
+        for idx in range(len(stack_limit[num_cov])):
+            element = stack_limit[num_cov][idx]
+            try:
+                pos = sentence_list.index(element[0])
+                maps_limit[num_cov].append(pos)
+            except:
+                sentence_list.append(element[0])
+                maps_limit[num_cov].append(len(sentence_list)-1)
+                stack_current.append(element)
     sen_ids_list = [getid(ivocab_trg, sentence) for sentence in sentence_list]
     num_sent = len(sen_ids_list)
     max_len = max(map(len, sen_ids_list))
@@ -233,7 +249,7 @@ def get_feature_map(stack, ivocab_trg, params):
     features["decoder"] = {}
     for i in range(params.num_decoder_layers):
         features["decoder"]["layer_%d" % i] = merge_tensor(stack_current, i)
-    return features, maps, len(sentence_list)
+    return features, maps, maps_limit, len(sentence_list)
 
 
 def get_feature(sentence_list, ivocab_trg):
@@ -431,6 +447,14 @@ def is_finish(element):
     return True
 
 
+def load_null2trg(n2tfile):
+    content = open(n2tfile, 'r').read()
+    result = content.split('\n')
+    if result[-1] == '':
+        del result[-1]
+    return result
+
+
 def getstate(encoderstate, num_layers):
     result = {"layer_%d" % i: encoderstate["decoder"]["layer_%d" % i]
               for i in range(num_layers)}
@@ -542,6 +566,11 @@ def get_align_prob(status):
     return tmp[2]
 
 
+def add_stack_limited(stack_limit, element, params):
+    stack_limit.append(element)
+    return stack_limit
+
+
 def add_stack(stack, element, beam_size, merge_status=None, max_status=1):
     if merge_status:
         for i in range(len(stack)):
@@ -592,7 +621,19 @@ def compare_candidate(a, b):
         return False
 
 
-def add_candidite(candidate_list, new, params):
+def list_of_empty_list(num):
+    result = []
+    for i in range(num):
+        result.append([])
+    return result
+
+
+def add_candidate_limit(candidate_list_limit, new, params):
+    candidate_list_limit.append(new)
+    return candidate_list_limit
+
+
+def add_candidate(candidate_list, new, params):
     have_same = False
     for i in range(len(candidate_list)):
         if candidate_list[i][0].split(' ')[0] == new[0].split(' ')[0]:
@@ -639,13 +680,15 @@ def get_translate_status(words_src, phrases, phrases_reverse, part, ngrams):
     return can_finish, options
 
 
+def get_lp(length, alpha):
+    return math.pow((5.0 + length) / 6.0, alpha)
+
 time_totalsp = 0
 def to_finish(state, alpha):
     result = []
     result.append(state[0])
     length = len(state[0].split(' '))
-    length_penalty = math.pow((5.0 + length) / 6.0, alpha)
-    length_penalty = 1.0
+    length_penalty = get_lp(length, alpha)
     result.append(state[3])
     result.append(state[-1] / length_penalty)
     #result.append(state[-1] / length)
@@ -703,6 +746,9 @@ def main(args):
         #else:
         phrase_table = json.load(open(args.phrase, 'r'))
         src2null_prob = json.load(open(args.nullprob ,'r'))
+        if args.null2trg:
+            null2trg_vocab = load_null2trg(args.null2trg)
+            print('null2trg vocab:', null2trg_vocab)
 
         # Load ivocab
         ivocab_src = build_ivocab(params.vocabulary["source"])
@@ -810,7 +856,8 @@ def main(args):
             phrases_reverse = reverse_phrase(phrases)
             #print('reverse phrase:', phrases_reverse)
             print('source:', src.encode('utf-8'))
-            print('probs_null:', probs_null)
+            if args.verbose:
+                print('probs_null:', probs_null)
             if args.rbpe:
                 words = reverse_bpe(src).split(' ')
                 print('reverse_bpe:', reverse_bpe(src).encode('utf-8'))
@@ -832,26 +879,29 @@ def main(args):
             2. coverage status (set), [coverage, status, align_log_prob]
             status (set): ['normal',  ''] or ['limited', limited word] 
             3. hidden state ({"layer_0": [...], "layer_1": [...]})
-            4. [id from last stack, last status id]
+            4. [last_trg_len , last_cov_num, last beam id, aggregated_nullprob]
             5. score
             '''
             if params.keep_status_num == 1:
-                element_init = ['', [coverage, ['normal', ''], 0.], getstate(encoder_state, params.num_decoder_layers), [0, 0], 0]
+                element_init = ['', [coverage, ['normal', ''], 0.], getstate(encoder_state, params.num_decoder_layers), [0, 0, 0, 0.], 0]
             else:
-                element_init = ['', {json.dumps([coverage, ['normal', ''], 0.]): 1}, getstate(encoder_state, params.num_decoder_layers), [0, 0], 0]
+                element_init = ['', {json.dumps([coverage, ['normal', ''], 0.]): 1}, getstate(encoder_state, params.num_decoder_layers), [0, 0, 0, 0.], 0]
             stacks = [[[element_init]]]
+            stacks_limit = [[[]]]
             finished = []
             length = 0
 
             time_neural = 0
             time_null = 0
             time_generate = 0
+            time_limit = 0
             time_test = 0
             count_test = [0]*10
+            count_test_tag = [0]*10
             while True:
                 # source to null
                 if args.verbose:
-                    print('===',length,'===')
+                    print('=== length:',length,'===')
                     print('== src2null ==')
                 all_empty = True
                 for num_cov in range(0, len_src+1):
@@ -863,10 +913,15 @@ def main(args):
                     all_empty = False
                     if len(stacks[length]) < num_cov+2:
                         stacks[length].append([])
+                        stacks_limit[length].append([])
+
                     if args.verbose:
-                        print('current')
+                        print('normal')
                         print_stack(stacks[length][num_cov])
-                    for element in stacks[length][num_cov]:
+                        print('limited:', len(stacks_limit[length][num_cov]))
+                        #print_stack(stacks_limit[length][num_cov])
+                    for i in range(len(stacks[length][num_cov])):
+                        element = stacks[length][num_cov][i]
                         if not can_addstack(stacks[length][num_cov+1], element[-1], params.beam_size):
                             continue
                         for status in get_status(element, params):
@@ -874,27 +929,28 @@ def main(args):
                                 continue
                             time_st = time.time()
                             for nullpos in get_kmax(null_order, status[0], params.beam_size):
-                                #count_test[0] += 1
                                 assert status[0][nullpos] == 0
                                 if params.src2null_loss:
                                     new_loss = element[-1]+my_log(probs_null[nullpos])
+                                    total_src2null_loss = element[3][3]+my_log(probs_null[nullpos])
                                 else:
                                     new_loss = element[-1]
+                                    total_src2null_loss = 0
                                 new_align_loss = status[2]+my_log(probs_null[nullpos])
                                 if not can_addstack(stacks[length][num_cov+1], new_loss, params.beam_size, align_loss=new_align_loss):
                                     continue
-                                #count_test[1] += 1
                                 newstatus = copy.deepcopy(status)
                                 newstatus[0][nullpos] = 1
                                 newstatus[2] = new_align_loss
+
+                                last_pos = [length, num_cov, i, total_src2null_loss]
                                 if params.keep_status_num == 1:
-                                    new = [element[0], newstatus]+element[2:4]+[new_loss]
+                                    new = [element[0], newstatus, element[2], last_pos, new_loss]
                                 else:
-                                    new = [element[0], {json.dumps(newstatus):1}]+element[2:4]+[new_loss]
+                                    new = [element[0], {json.dumps(newstatus):1}, element[2], last_pos, new_loss]
                                 stacks[length][num_cov+1] = add_stack(stacks[length][num_cov+1], new,params.beam_size, params.merge_status, params.keep_status_num)
                                 break
                             time_ed = time.time()
-                            #count_test[2] += time_ed-time_st
                     time_null_end = time.time()
                     time_null += time_null_end-time_null_start
 
@@ -903,7 +959,8 @@ def main(args):
 
                 # do the neural
                 neural_result = [0]*(len_src+1)
-                features, maps, num_x = get_feature_map(stacks[length], ivocab_trg, params)
+                neural_result_limit = [0]*(len_src+1)
+                features, maps, maps_limit, num_x = get_feature_map(stacks[length], stacks_limit[length], ivocab_trg, params)
                 features["encoder"] = np.tile(encoder_state["encoder"], (num_x, 1, 1))
                 features["source"] = [getid(ivocab_src, input)] * num_x 
                 features["source_length"] = [len(features["source"][0])] * num_x 
@@ -932,19 +989,67 @@ def main(args):
                     for pos in maps[num_cov]:
                         neural_result[num_cov][0].append(log_probs[pos])
                         neural_result[num_cov][1].append(new_state[pos])
+                for num_cov in range(0, len_src+1):
+                    if len(maps_limit[num_cov]) == 0:
+                        continue
+                    neural_result_limit[num_cov] = [[], []]
+                    for pos in maps_limit[num_cov]:
+                        neural_result_limit[num_cov][0].append(log_probs[pos])
+                        neural_result_limit[num_cov][1].append(new_state[pos])
 
                 # update the stacks
-                print('== generation ==')
+                if args.verbose:
+                    print('== generation ==')
+                time_c = time.time()
+                stacks = append_empty(stacks, length+1, len_src+1)
+                stacks_limit = append_empty(stacks_limit, length+1, len_src+1)
                 for num_cov in range(0, len_src+1):
-                    print('=', num_cov, '=')
+                    #print('= limit', num_cov, '=')
+                    if neural_result_limit[num_cov] == 0:
+                        continue
+                    log_probs_limit, new_state_limit = neural_result_limit[num_cov]
+                    stacks_limit = append_empty(stacks_limit, length+1, len_src+1)
+                    if params.split_limited:
+                        for i in range(len(stacks_limit[length][num_cov])):
+                            count_test[0] += 1
+                            element = stacks_limit[length][num_cov][i]
+                            assert sum(element[1][0]) == num_cov
+                            for status in get_status(element, params):
+                                assert status[1][0] == "limited"
+                                limits = status[1][1]
+                                new_loss = float(element[-1]+log_probs_limit[i][getid_word(ivocab_trg, limits[0])])
+                                if len(limits) > 1:
+                                    #newstatus = copy.deepcopy(status)
+                                    newstatus = status
+                                    newstatus[1][1] = limits[1:]
+                                    # warning: only works when keep_status_num == 1
+                                    new = [(element[0]+' '+limits[0]).strip(), newstatus, new_state_limit[i], element[3], new_loss]
+                                    stacks_limit[length+1][num_cov] = add_stack_limited(stacks_limit[length+1][num_cov], new, params)
+                                else:
+                                    if not can_addstack(stacks[length+1][num_cov], new_loss, params.beam_size):
+                                        continue
+                                    #newstatus = copy.deepcopy(status)
+                                    newstatus = status
+                                    newstatus[1][0] = "normal"
+                                    newstatus[1][1] = ""
+                                    if params.keep_status_num == 1: 
+                                        new = [(element[0]+' '+limits[0]).strip(), newstatus, new_state_limit[i], element[3], new_loss]
+                                    else:
+                                        new = [(element[0]+' '+limits[0]).strip(), {json.dumps(newstatus):1}, new_state_limit[i], element[3], new_loss]
+                                    stacks[length+1][num_cov] = add_stack(stacks[length+1][num_cov], new, params.beam_size, params.merge_status, params.keep_status_num)
+                time_le = time.time()
+                time_limit += time_le-time_c
+                for num_cov in range(0, len_src+1):
+                    #print('= normal', num_cov, '=')
                     if neural_result[num_cov] == 0:
                         continue
                     stack_current = stacks[length][num_cov]
                     log_probs, new_state = neural_result[num_cov]
-                    stacks = append_empty(stacks, length+1, len_src+1)
-                    time_c = time.time()
+                    
+
                     for i in range(len(stack_current)):
                         element = stack_current[i]
+                        assert sum(element[1][0]) == num_cov
                         for status in get_status(element, params):
                             count_test[2] += 1
                             #status = json.loads(status_str)
@@ -964,16 +1069,20 @@ def main(args):
                                 else:
                                     newstatus[1][1] = limits[1:]
                                 if params.keep_status_num == 1: 
-                                    new = [(element[0]+' '+limits[0]).strip(), newstatus, new_state[i], [i, 0], new_loss]
+                                    new = [(element[0]+' '+limits[0]).strip(), newstatus, new_state[i], element[3], new_loss]
                                 else:
-                                    new = [(element[0]+' '+limits[0]).strip(), {json.dumps(newstatus):1}, new_state[i], [i, 0], new_loss]
-                                stacks[length+1][num_cov] = add_stack(stacks[length+1][num_cov], new, params.beam_size, params.merge_status, params.keep_status_num)
+                                    new = [(element[0]+' '+limits[0]).strip(), {json.dumps(newstatus):1}, new_state[i], element[3], new_loss]
+                                if params.split_limited and newstatus[1][0] == "limited":
+                                    stacks_limit[length+1][num_cov] = add_stack_limited(stacks_limit[length+1][num_cov], new, params)
+                                else:
+                                    stacks[length+1][num_cov] = add_stack(stacks[length+1][num_cov], new, params.beam_size, params.merge_status, params.keep_status_num)
                                 time_le = time.time()
                             # no limitation
                             else:
                                 # candidate phrase list: list of [phrase, pos_start, pos_end, loss, align_loss]
                                 time_cs = time.time()
-                                candidate_phrase_list = []
+                                candidate_phrase_list = list_of_empty_list(len_src+1)
+                                candidate_phrase_list_limit = list_of_empty_list(len_src+1)
                                 count_test[3] += 1
                                 all_covered = True
                                 for pos in range(len(status[0])):
@@ -997,7 +1106,10 @@ def main(args):
                                                     words_p = phrase.split(' ')
                                                     new_loss = log_probs[i][getid_word(ivocab_trg, words_p[0])]
                                                     new_candidate = [phrase, pos, pos_end, new_loss, prob_align]
-                                                    candidate_phrase_list = add_candidite(candidate_phrase_list, new_candidate, params)
+                                                    if params.split_limited and len(words_p) > 1:
+                                                        candidate_phrase_list_limit[len_bpe_phrase] = add_candidate_limit(candidate_phrase_list_limit[len_bpe_phrase], new_candidate, params)
+                                                    else:
+                                                        candidate_phrase_list[len_bpe_phrase] = add_candidate(candidate_phrase_list[len_bpe_phrase], new_candidate, params)
                                     #generate from source word
                                     if status[0][pos] == 0:
                                         all_covered = False
@@ -1008,45 +1120,98 @@ def main(args):
                                             words_p = phrase.split(' ')
                                             new_loss = log_probs[i][getid_word(ivocab_trg, words_p[0])]
                                             new_candidate = [phrase, pos, pos, new_loss, prob_align]
-                                            candidate_phrase_list = add_candidite(candidate_phrase_list, new_candidate, params)
+                                            if params.split_limited and len(words_p) > 1:
+                                                candidate_phrase_list_limit[1] = add_candidate_limit(candidate_phrase_list_limit[1], new_candidate, params)
+                                            else:
+                                                candidate_phrase_list[1] = add_candidate(candidate_phrase_list[1], new_candidate, params)
+                                # generate from null2trg
+                                for stopword in null2trg_vocab:
+                                    #print("test")
+                                    #print(stopword)
+                                    #print(candidate_phrase_list)
+                                    new_loss = log_probs[i][getid_word(ivocab_trg, stopword)]
+                                    new_candidate = [stopword, -1, -1, new_loss, 1]
+                                    candidate_phrase_list[0] = add_candidate(candidate_phrase_list[0], new_candidate, params)
                                 time_ce = time.time()
                                 time_test += time_ce-time_cs
+                                    
 
-                                if args.verbose:
-                                    print('current:', element[0].encode('utf-8'), element[1], element[-1])
-                                    #print('candidates:', candidate_phrase_list)
+                                #if args.verbose:
+                                #    print('current:', element[0].encode('utf-8'), element[1], element[-1])
+                                #   print('candidates:', candidate_phrase_list)
 
-                                for candidate in candidate_phrase_list:
-                                    phrase, pos, pos_end, loss, prob_align = candidate
-                                    len_covered = pos_end-pos+1
-                                    words_p = phrase.split(' ')
-                                    new_loss = float(element[-1]+loss)
-                                    if not can_addstack(stacks[length+1][num_cov+1], new_loss, params.beam_size):
-                                        break 
-                                    newstatus = copy.deepcopy(status)
-                                    for p in range(pos, pos_end+1):
-                                        newstatus[0][pos] = 1
-                                    if len(words_p) > 1:
+                                for j in range(len(candidate_phrase_list)):
+                                    for candidate in candidate_phrase_list[j]:
+                                        phrase, pos, pos_end, loss, prob_align = candidate
+                                        last_pos = [length, num_cov, i, element[3][3]]
+                                        words_p = phrase.split(' ')
+                                        new_loss = float(element[-1]+loss)
+                                        # safe prune for search
+                                        if len(finished) >= params.beam_size and new_loss/get_lp(len_src+params.decode_length, params.decode_alpha) < finished[-1][-1]:
+                                            continue
+                                        if not can_addstack(stacks[length+1][num_cov+1], new_loss, params.beam_size):
+                                            break 
+                                        newstatus = copy.deepcopy(status)
+                                        if pos >= 0:
+                                            len_covered = pos_end-pos+1
+                                            for p in range(pos, pos_end+1):
+                                                newstatus[0][p] = 1
+                                        else:
+                                            len_covered = 0
+                                        assert len_covered == j
+                                        if len(words_p) > 1:
+                                            newstatus[1] = ["limited", words_p[1:]]
+                                        else:
+                                            newstatus[1] = ["normal", ""]
+                                        newstatus[2] += math.log(prob_align)
+                                        if params.keep_status_num == 1: 
+                                            new = [(element[0]+' '+words_p[0]).strip(), newstatus, new_state[i], last_pos, new_loss]
+                                        else:
+                                            new = [(element[0]+' '+words_p[0]).strip(), {json.dumps(newstatus):1}, new_state[i], last_pos, new_loss]
+                                        stacks[length+1][num_cov+len_covered] = add_stack(stacks[length+1][num_cov+len_covered], new, params.beam_size, params.merge_status, params.keep_status_num)
+                                    if len(stacks[length+1][num_cov+len_covered]) > 0:
+                                        loss_threshold = stacks[length+1][num_cov+len_covered][-1][-1]
+                                    else:
+                                        loss_threshold = 0
+                                    # limited
+                                    for candidate in candidate_phrase_list_limit[j]:
+                                        phrase, pos, pos_end, loss, prob_align = candidate
+                                        last_pos = [length, num_cov, i, element[3][3]]
+                                        words_p = phrase.split(' ')
+                                        new_loss = float(element[-1]+loss)
+                                        # safe prune for search
+                                        if len(finished) >= params.beam_size and new_loss/get_lp(len_src+params.decode_length, params.decode_alpha) < finished[-1][-1]:
+                                            continue
+                                        # not safe prune
+                                        if new_loss < loss_threshold:
+                                            continue
+                                        newstatus = copy.deepcopy(status)
+                                        if pos >= 0:
+                                            len_covered = pos_end-pos+1
+                                            for p in range(pos, pos_end+1):
+                                                newstatus[0][p] = 1
+                                        else:
+                                            len_covered = 0
+                                        assert len_covered == j
                                         newstatus[1] = ["limited", words_p[1:]]
-                                    else:
-                                        newstatus[1] = ["normal", ""]
-                                    newstatus[2] += math.log(prob_align)
-                                    if params.keep_status_num == 1: 
-                                        new = [(element[0]+' '+words_p[0]).strip(), newstatus, new_state[i], [i, 0], new_loss]
-                                    else:
-                                        new = [(element[0]+' '+words_p[0]).strip(), {json.dumps(newstatus):1}, new_state[i], [i, 0], new_loss]
-                                    stacks[length+1][num_cov+len_covered] = add_stack(stacks[length+1][num_cov+len_covered], new, params.beam_size, params.merge_status, params.keep_status_num)
+                                        newstatus[2] += math.log(prob_align)
+                                        if params.keep_status_num == 1: 
+                                            new = [(element[0]+' '+words_p[0]).strip(), newstatus, new_state[i], last_pos, new_loss]
+                                        else:
+                                            new = [(element[0]+' '+words_p[0]).strip(), {json.dumps(newstatus):1}, new_state[i], last_pos, new_loss]
+                                        stacks_limit[length+1][num_cov+len_covered] = add_stack_limited(stacks_limit[length+1][num_cov+len_covered], new, params)
+
                                 if all_covered:
                                     new_loss = float(element[-1]+log_probs[i][getid_word(ivocab_trg, '<eos>')])
                                     new = [(element[0]+' <eos>').strip(), {json.dumps(status):1}, new_state[i], i, new_loss]
-                                    print('to_finish:', new[0].encode('utf-8'), new[-1])
+                                    #print('to_finish:', new[0].encode('utf-8'), new[-1])
                                     finished = add_stack(finished, to_finish(new, params.decode_alpha), params.beam_size)
 
-                    time_d = time.time()
-                    time_generate += time_d-time_c
+                time_d = time.time()
+                time_generate += time_d-time_c
                 if args.verbose:
-                    print('=',len_src, '=')
-                    print_stack(stacks[length][len_src])
+                    #print('=',len_src, '=')
+                    #print_stack(stacks[length][len_src])
                     print_stack_finished(finished)
                 length += 1
                 #if length == 2:
@@ -1082,7 +1247,7 @@ def main(args):
             #fout.write((finished[0][0].replace(' <eos>', '').strip()+'\n').encode('utf-8'))
             fout.write((result.replace(' <eos>', '').strip()+'\n').encode('utf-8'))
             print((result.replace(' <eos>', '').strip()).encode('utf-8'))
-            print((finished[0][0].replace(' <eos>', '').strip()).encode('utf-8'))
+            #print((finished[0][0].replace(' <eos>', '').strip()).encode('utf-8'))
 
             end = time.time()
             global time_totalsp
@@ -1090,6 +1255,7 @@ def main(args):
                 print('time total null:', time_null, 's')
                 print('time total neural:', time_neural, 's')
                 print('time total generate:', time_generate, 's')
+                print('time total limit:', time_limit, 's')
                 print('time total test:', time_test, 's')
                 print('time total:', end-start, 'seconds')
                 print('count:', count_test)
