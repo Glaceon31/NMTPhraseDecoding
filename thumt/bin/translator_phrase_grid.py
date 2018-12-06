@@ -1141,6 +1141,8 @@ def main(args):
                                 #   print('candidates:', candidate_phrase_list)
 
                                 for j in range(len(candidate_phrase_list)):
+                                    if num_cov+j > len_src:
+                                        continue
                                     for candidate in candidate_phrase_list[j]:
                                         phrase, pos, pos_end, loss, prob_align = candidate
                                         last_pos = [length, num_cov, i, element[3][3]]
@@ -1169,8 +1171,8 @@ def main(args):
                                         else:
                                             new = [(element[0]+' '+words_p[0]).strip(), {json.dumps(newstatus):1}, new_state[i], last_pos, new_loss]
                                         stacks[length+1][num_cov+len_covered] = add_stack(stacks[length+1][num_cov+len_covered], new, params.beam_size, params.merge_status, params.keep_status_num)
-                                    if len(stacks[length+1][num_cov+len_covered]) > 0:
-                                        loss_threshold = stacks[length+1][num_cov+len_covered][-1][-1]
+                                    if len(stacks[length+1][num_cov+j]) > 0:
+                                        loss_threshold = stacks[length+1][num_cov+j][-1][-1]
                                     else:
                                         loss_threshold = 0
                                     # limited
