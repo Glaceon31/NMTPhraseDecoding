@@ -38,20 +38,20 @@ if __name__ == "__main__":
 
     src = open(args.src, 'r').read() 
     hypo = open(args.hypo, 'r').read() 
-    oracle = open(args.oracle, 'r').read() 
+    #oracle = open(args.oracle, 'r').read() 
     baseline = open(args.baseline, 'r').read()
     refs = [open(ref, 'r').read() for ref in args.refs]
 
     if args.senid == -1:
         lsrc = getlines(src)
         lhypo = getlines(hypo)
-        loracle = getlines(oracle)
+        #loracle = getlines(oracle)
         lbase = getlines(baseline)
         lrefs = [getlines(r) for r in refs]
     else:
         lsrc = [getlines(src)[args.senid]]
         lhypo = [getlines(hypo)[0]]
-        loracle = [getlines(oracle)[args.senid]]
+        #loracle = [getlines(oracle)[args.senid]]
         lbase = [getlines(baseline)[args.senid]]
         lrefs = [[getlines(r)[args.senid]] for r in refs]
 
@@ -59,13 +59,14 @@ if __name__ == "__main__":
 
     for i in range(len(lsrc)):
         reftmp = [t[i] for t in lrefs]
+        print('=== %d ===' %i)
         print('src:', lsrc[i])
         print('ours:', lhypo[i], '('+str(bleu(rbpe(lhypo[i]), reftmp, 4, verbose=True))+')')
         print('baseline:', lbase[i], '('+str(bleu(rbpe(lbase[i]), reftmp, 4, verbose=True))+')')
-        print('oracle:', loracle[i], '('+str(bleu(rbpe(loracle[i]), reftmp, 4, verbose=True))+')')
+        #print('oracle:', loracle[i], '('+str(bleu(rbpe(loracle[i]), reftmp, 4, verbose=True))+')')
         for r in range(len(reftmp)):
             print('ref'+str(r)+':', reftmp[r])
         print('\n')
-        if i == 6:
+        if i == 100:
             break
 

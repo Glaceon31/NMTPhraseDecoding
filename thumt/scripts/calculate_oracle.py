@@ -103,8 +103,8 @@ def bleu_appro(hypo_c, refs_dict, n, hypo_dict=None, verbose=False):
 
     result = 0.
     bleu_n = [0.]*n
-    if correctgram_count[0] == 0:
-        return 0.
+    #if correctgram_count[0] == 0:
+    #    return 0.
     for i in range(n):
         if correctgram_count[i] == 0:
             correctgram_count[i] += 1

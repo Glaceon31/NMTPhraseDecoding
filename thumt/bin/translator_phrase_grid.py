@@ -1205,7 +1205,7 @@ def main(args):
 
                                 if all_covered:
                                     new_loss = float(element[-1]+log_probs[i][getid_word(ivocab_trg, '<eos>')])
-                                    new = [(element[0]+' <eos>').strip(), {json.dumps(status):1}, new_state[i], i, new_loss]
+                                    new = [(element[0]+' <eos>').strip(), {json.dumps(status):1}, new_state[i], element[3], new_loss]
                                     #print('to_finish:', new[0].encode('utf-8'), new[-1])
                                     finished = add_stack(finished, to_finish(new, params.decode_alpha), params.beam_size)
 
@@ -1262,6 +1262,35 @@ def main(args):
                 print('time total:', end-start, 'seconds')
                 print('count:', count_test)
 
+            # rewinding
+            if args.verbose:
+                print('start rewinding...')
+                print('src:', src.encode('utf-8'))
+                print('trg:', finished[0][0].replace(' <eos>', '').strip().encode('utf-8'))
+                lastpos = finished[0][1]
+                words_trg = finished[0][0].replace(' <eos>', '').strip().split(' ')
+                now = stacks[lastpos[0]][lastpos[1]][lastpos[2]]
+                while True:
+                    last_cov = now[1][0]
+                    last_words = len(now[0].split(' '))
+                    lastpos = now[3]
+                    now_words = lastpos[0]
+                    #print(now_words, last_words)
+                    trg_word = ' '.join(words_trg[now_words:last_words])
+                    #print(lastpos)
+                    now = stacks[lastpos[0]][lastpos[1]][lastpos[2]]
+                    src_word = ''
+                    for i in range(len(last_cov)):
+                        if last_cov[i] == 1 and now[1][0][i] == 0:
+                            src_word += ' '+words[i]
+                    if src_word == '':
+                        src_word = '<null>'
+                    if trg_word == '':
+                        trg_word = '<null>'
+                    print(src_word.encode('utf-8'), '-', trg_word)
+                    if lastpos[0] == 0 and lastpos[1] == 0:
+                        break
+                    
             '''
             if args.verbose:
                 len_now = len(finished[0][0].split(' '))-1
