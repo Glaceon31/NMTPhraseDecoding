@@ -89,6 +89,8 @@ def default_parameters():
         keep_status_num=1,
         src2null_loss=True,
         split_limited=False,
+        allow_src2stop=True,
+        punc_border=False,
         cut_ending=False,
         cut_threshold=4.
     )
@@ -276,7 +278,20 @@ def reverse_phrase(phrases):
     return result
 
 
-def subset(phrases, words, ngram, cov=None, rbpe=False):
+def filter_stop(phrases, stopword_list):
+    result = []
+    for p in phrases:
+        stop = True
+        for word in p[0].split(' '):
+            if not word in stopword_list:
+                stop = False
+                break
+        if not stop:
+            result.append(p)
+    return result
+
+
+def subset(phrases, words, ngram, params, cov=None, rbpe=False, stopword_list=None):
     result = {}
     covered = [0] * len(words)
     for i in range(len(words)):
@@ -289,7 +304,10 @@ def subset(phrases, words, ngram, cov=None, rbpe=False):
                     break
             phrase = ' '.join(words[i:j])
             if phrases.has_key(phrase):
-                result[phrase] = phrases[phrase]
+                if params.allow_src2stop:
+                    result[phrase] = phrases[phrase]
+                else:
+                    result[phrase] = filter_stop(phrases[phrase], stopword_list)
                 for k in range(i, j):
                     covered[k] = 1
     # special treatment for words with no phrase
@@ -578,7 +596,7 @@ def add_stack(stack, element, beam_size, merge_status=None, max_status=1):
                 if max_status == 1:
                     st = element[1]
                     if element[1][-1] > stack[i][1][-1]:
-                        stack[i][1] = element[1]
+                        stack[i] = element
                 else:
                     st = element[1].keys()[0]
                     if not stack[i][1].has_key(st):
@@ -852,7 +870,7 @@ def main(args):
             encoder_state = sess.run(enc, feed_dict=feed_src)
 
             # generate a subset of phrase table for current translation
-            phrases = subset(phrase_table, words, args.ngram, rbpe=args.rbpe)
+            phrases = subset(phrase_table, words, args.ngram, params, rbpe=args.rbpe, stopword_list=null2trg_vocab)
             phrases_reverse = reverse_phrase(phrases)
             #print('reverse phrase:', phrases_reverse)
             print('source:', src.encode('utf-8'))
@@ -882,10 +900,12 @@ def main(args):
             4. [last_trg_len , last_cov_num, last beam id, aggregated_nullprob]
             5. score
             '''
+            init_status = [coverage, ['normal', ''], 0.]
+            #init_status = {'coverage': coverage, 'limitation': ['normal', ''], 'align_prob': 0.}
             if params.keep_status_num == 1:
-                element_init = ['', [coverage, ['normal', ''], 0.], getstate(encoder_state, params.num_decoder_layers), [0, 0, 0, 0.], 0]
+                element_init = ['', init_status, getstate(encoder_state, params.num_decoder_layers), [0, 0, 0, 0.], 0]
             else:
-                element_init = ['', {json.dumps([coverage, ['normal', ''], 0.]): 1}, getstate(encoder_state, params.num_decoder_layers), [0, 0, 0, 0.], 0]
+                element_init = ['', {json.dumps(init_status): 1}, getstate(encoder_state, params.num_decoder_layers), [0, 0, 0, 0.], 0]
             stacks = [[[element_init]]]
             stacks_limit = [[[]]]
             finished = []
@@ -1017,10 +1037,11 @@ def main(args):
                             for status in get_status(element, params):
                                 assert status[1][0] == "limited"
                                 limits = status[1][1]
+                                    
                                 new_loss = float(element[-1]+log_probs_limit[i][getid_word(ivocab_trg, limits[0])])
                                 if len(limits) > 1:
-                                    #newstatus = copy.deepcopy(status)
-                                    newstatus = status
+                                    newstatus = copy.deepcopy(status)
+                                    #newstatus = status
                                     newstatus[1][1] = limits[1:]
                                     # warning: only works when keep_status_num == 1
                                     new = [(element[0]+' '+limits[0]).strip(), newstatus, new_state_limit[i], element[3], new_loss]
@@ -1028,8 +1049,8 @@ def main(args):
                                 else:
                                     if not can_addstack(stacks[length+1][num_cov], new_loss, params.beam_size):
                                         continue
-                                    #newstatus = copy.deepcopy(status)
-                                    newstatus = status
+                                    newstatus = copy.deepcopy(status)
+                                    #newstatus = status
                                     newstatus[1][0] = "normal"
                                     newstatus[1][1] = ""
                                     if params.keep_status_num == 1: 
@@ -1246,10 +1267,8 @@ def main(args):
             else:
                 result = finished[0][0]
 
-            #fout.write((finished[0][0].replace(' <eos>', '').strip()+'\n').encode('utf-8'))
             fout.write((result.replace(' <eos>', '').strip()+'\n').encode('utf-8'))
             print((result.replace(' <eos>', '').strip()).encode('utf-8'))
-            #print((finished[0][0].replace(' <eos>', '').strip()).encode('utf-8'))
 
             end = time.time()
             global time_totalsp
@@ -1268,12 +1287,14 @@ def main(args):
                 print('src:', src.encode('utf-8'))
                 print('trg:', finished[0][0].replace(' <eos>', '').strip().encode('utf-8'))
                 lastpos = finished[0][1]
+                print('first lastpos:', lastpos)
                 words_trg = finished[0][0].replace(' <eos>', '').strip().split(' ')
                 now = stacks[lastpos[0]][lastpos[1]][lastpos[2]]
                 while True:
                     last_cov = now[1][0]
                     last_words = len(now[0].split(' '))
                     lastpos = now[3]
+                    print('lastpos:', lastpos)
                     now_words = lastpos[0]
                     #print(now_words, last_words)
                     trg_word = ' '.join(words_trg[now_words:last_words])
