@@ -15,6 +15,7 @@ import copy
 import tensorflow as tf
 import thumt.data.vocab as vocabulary
 import thumt.models as models
+import thumt.utils.automatons as automatons
 
 import numpy as np
 import math
@@ -457,7 +458,7 @@ def build_ivocab(vocab):
 def is_finish(element):
     cov = element[0]
     status = element[1]
-    if status[0] == 'limited':
+    if status['limit'] == 'limited':
         return False
     for i in cov:
         if i != 1:
@@ -520,7 +521,7 @@ def can_addstack(stack, loss, beam_size, align_loss=None):
                     if loss == s[-1]:
                         # pending: consider multiple status
                         # warning: only allow keep_status_num == 1 here
-                        if align_loss > s[1][2]:
+                        if align_loss > s[1]['align_prob']:
                             return True
                         #if align_loss > json.loads(s[1].keys()[0])[2]:
                         #    return True
@@ -536,12 +537,16 @@ def get_status(element, params):
         return [json.loads(i) for i in element[1].keys()] 
 
 
-def get_kmax(sorted_array, avail, num):
+def get_kmax(sorted_array, avail, num, visible=None):
     result = []
     pos = 0
     while len(result) < num and pos < len(sorted_array):
         if avail[sorted_array[pos]] == 0:
-            result.append(sorted_array[pos])
+            if visible:
+                if sorted_array[pos] in visible:
+                    result.append(sorted_array[pos])
+            else:
+                result.append(sorted_array[pos])
         pos += 1
     return result
 
@@ -581,7 +586,7 @@ def min_align_prob(statuses):
 
 def get_align_prob(status):
     tmp = json.loads(status)
-    return tmp[2]
+    return tmp['align_prob']
 
 
 def add_stack_limited(stack_limit, element, params):
@@ -595,7 +600,7 @@ def add_stack(stack, element, beam_size, merge_status=None, max_status=1):
             if element[0] == stack[i][0]: 
                 if max_status == 1:
                     st = element[1]
-                    if element[1][-1] > stack[i][1][-1]:
+                    if element[1]['align_prob'] > stack[i][1]['align_prob']:
                         stack[i] = element
                 else:
                     st = element[1].keys()[0]
@@ -894,14 +899,15 @@ def main(args):
             '''
             stacks:
             1. partial translation
-            2. coverage status (set), [coverage, status, align_log_prob]
-            status (set): ['normal',  ''] or ['limited', limited word] 
+            2. coverage status (dict)
             3. hidden state ({"layer_0": [...], "layer_1": [...]})
             4. [last_trg_len , last_cov_num, last beam id, aggregated_nullprob]
             5. score
             '''
-            init_status = [coverage, ['normal', ''], 0.]
-            #init_status = {'coverage': coverage, 'limitation': ['normal', ''], 'align_prob': 0.}
+            #init_status = [coverage, ['normal', ''], 0.]
+            autom = automatons.build(words, params)
+            automatons.print_autom(autom)
+            init_status = {'coverage': coverage, 'limit': ['normal', ''], 'align_prob': 0., 'automatons': 0}
             if params.keep_status_num == 1:
                 element_init = ['', init_status, getstate(encoder_state, params.num_decoder_layers), [0, 0, 0, 0.], 0]
             else:
@@ -942,26 +948,31 @@ def main(args):
                         #print_stack(stacks_limit[length][num_cov])
                     for i in range(len(stacks[length][num_cov])):
                         element = stacks[length][num_cov][i]
+                        print('num_state:', element[1]['automatons'])
+                        autostate = autom['states'][element[1]['automatons']]
                         if not can_addstack(stacks[length][num_cov+1], element[-1], params.beam_size):
                             continue
                         for status in get_status(element, params):
-                            if status[1][0] == 'limited':
+                            if status['limit'][0] == 'limited':
                                 continue
                             time_st = time.time()
-                            for nullpos in get_kmax(null_order, status[0], params.beam_size):
-                                assert status[0][nullpos] == 0
+                            for nullpos in get_kmax(null_order, status['coverage'], params.beam_size, visible=autostate['visible']):
+                                assert status['coverage'][nullpos] == 0
                                 if params.src2null_loss:
                                     new_loss = element[-1]+my_log(probs_null[nullpos])
                                     total_src2null_loss = element[3][3]+my_log(probs_null[nullpos])
                                 else:
                                     new_loss = element[-1]
                                     total_src2null_loss = 0
-                                new_align_loss = status[2]+my_log(probs_null[nullpos])
+                                new_align_loss = status['align_prob']+my_log(probs_null[nullpos])
                                 if not can_addstack(stacks[length][num_cov+1], new_loss, params.beam_size, align_loss=new_align_loss):
                                     continue
                                 newstatus = copy.deepcopy(status)
-                                newstatus[0][nullpos] = 1
-                                newstatus[2] = new_align_loss
+                                newstatus['coverage'][nullpos] = 1
+                                newstatus['align_prob'] = new_align_loss
+
+                                if automatons.can_go_next(autostate, newstatus['coverage']) and autostate['next_state']:
+                                    newstatus['automatons'] = autostate['next_state']
 
                                 last_pos = [length, num_cov, i, total_src2null_loss]
                                 if params.keep_status_num == 1:
@@ -1023,6 +1034,7 @@ def main(args):
                 time_c = time.time()
                 stacks = append_empty(stacks, length+1, len_src+1)
                 stacks_limit = append_empty(stacks_limit, length+1, len_src+1)
+                # limited stack
                 for num_cov in range(0, len_src+1):
                     #print('= limit', num_cov, '=')
                     if neural_result_limit[num_cov] == 0:
@@ -1033,16 +1045,16 @@ def main(args):
                         for i in range(len(stacks_limit[length][num_cov])):
                             count_test[0] += 1
                             element = stacks_limit[length][num_cov][i]
-                            assert sum(element[1][0]) == num_cov
+                            assert sum(element[1]['coverage']) == num_cov
                             for status in get_status(element, params):
-                                assert status[1][0] == "limited"
-                                limits = status[1][1]
+                                assert status['limit'][0] == "limited"
+                                limits = status['limit'][1]
                                     
                                 new_loss = float(element[-1]+log_probs_limit[i][getid_word(ivocab_trg, limits[0])])
                                 if len(limits) > 1:
                                     newstatus = copy.deepcopy(status)
                                     #newstatus = status
-                                    newstatus[1][1] = limits[1:]
+                                    newstatus['limit'][1] = limits[1:]
                                     # warning: only works when keep_status_num == 1
                                     new = [(element[0]+' '+limits[0]).strip(), newstatus, new_state_limit[i], element[3], new_loss]
                                     stacks_limit[length+1][num_cov] = add_stack_limited(stacks_limit[length+1][num_cov], new, params)
@@ -1051,8 +1063,8 @@ def main(args):
                                         continue
                                     newstatus = copy.deepcopy(status)
                                     #newstatus = status
-                                    newstatus[1][0] = "normal"
-                                    newstatus[1][1] = ""
+                                    newstatus['limit'][0] = "normal"
+                                    newstatus['limit'][1] = ""
                                     if params.keep_status_num == 1: 
                                         new = [(element[0]+' '+limits[0]).strip(), newstatus, new_state_limit[i], element[3], new_loss]
                                     else:
@@ -1070,30 +1082,31 @@ def main(args):
 
                     for i in range(len(stack_current)):
                         element = stack_current[i]
-                        assert sum(element[1][0]) == num_cov
+                        assert sum(element[1]['coverage']) == num_cov
                         for status in get_status(element, params):
                             count_test[2] += 1
-                            #status = json.loads(status_str)
+                            visible = autom['states'][status['automatons']]['visible']
+                            autostate = autom['states'][status['automatons']]
                             # limit
-                            if status[1][0] == "limited":
+                            if status['limit'][0] == "limited":
                                 time_ls = time.time()
                                 count_test[0] += 1
-                                limits = status[1][1]
+                                limits = status['limit'][1]
                                 new_loss = float(element[-1]+log_probs[i][getid_word(ivocab_trg, limits[0])])
                                 if not can_addstack(stacks[length+1][num_cov], new_loss, params.beam_size):
                                     continue
                                 count_test[1] += 1
                                 newstatus = copy.deepcopy(status)
                                 if len(limits) == 1:
-                                    newstatus[1][0] = "normal"
-                                    newstatus[1][1] = ""
+                                    newstatus['limit'][0] = "normal"
+                                    newstatus['limit'][1] = ""
                                 else:
-                                    newstatus[1][1] = limits[1:]
+                                    newstatus['limit'][1] = limits[1:]
                                 if params.keep_status_num == 1: 
                                     new = [(element[0]+' '+limits[0]).strip(), newstatus, new_state[i], element[3], new_loss]
                                 else:
                                     new = [(element[0]+' '+limits[0]).strip(), {json.dumps(newstatus):1}, new_state[i], element[3], new_loss]
-                                if params.split_limited and newstatus[1][0] == "limited":
+                                if params.split_limited and newstatus['limit'][0] == "limited":
                                     stacks_limit[length+1][num_cov] = add_stack_limited(stacks_limit[length+1][num_cov], new, params)
                                 else:
                                     stacks[length+1][num_cov] = add_stack(stacks[length+1][num_cov], new, params.beam_size, params.merge_status, params.keep_status_num)
@@ -1106,14 +1119,14 @@ def main(args):
                                 candidate_phrase_list_limit = list_of_empty_list(len_src+1)
                                 count_test[3] += 1
                                 all_covered = True
-                                for pos in range(len(status[0])):
+                                for pos in visible:
                                     # bpe_phrase
                                     if params.bpe_phrase:
                                         # find untranslated bpe phrase
                                         pos_end = pos
-                                        if status[0][pos_end] == 1:
+                                        if status['coverage'][pos_end] == 1:
                                             continue
-                                        while pos_end+1 < len(words) and  status[0][pos_end+1] == 0 and words[pos_end].endswith('@@'):
+                                        while pos_end+1 in visible and  status['coverage'][pos_end+1] == 0 and words[pos_end].endswith('@@'):
                                             pos_end += 1
                                         if pos_end > pos:
                                             bpe_phrase = ' '.join(words[pos:pos_end+1])
@@ -1132,7 +1145,7 @@ def main(args):
                                                     else:
                                                         candidate_phrase_list[len_bpe_phrase] = add_candidate(candidate_phrase_list[len_bpe_phrase], new_candidate, params)
                                     #generate from source word
-                                    if status[0][pos] == 0:
+                                    if status['coverage'][pos] == 0:
                                         all_covered = False
                                         num_total = len(phrases[words[pos]])
                                         for j in range(num_total):
@@ -1147,9 +1160,6 @@ def main(args):
                                                 candidate_phrase_list[1] = add_candidate(candidate_phrase_list[1], new_candidate, params)
                                 # generate from null2trg
                                 for stopword in null2trg_vocab:
-                                    #print("test")
-                                    #print(stopword)
-                                    #print(candidate_phrase_list)
                                     new_loss = log_probs[i][getid_word(ivocab_trg, stopword)]
                                     new_candidate = [stopword, -1, -1, new_loss, 1]
                                     candidate_phrase_list[0] = add_candidate(candidate_phrase_list[0], new_candidate, params)
@@ -1178,15 +1188,17 @@ def main(args):
                                         if pos >= 0:
                                             len_covered = pos_end-pos+1
                                             for p in range(pos, pos_end+1):
-                                                newstatus[0][p] = 1
+                                                newstatus['coverage'][p] = 1
+                                            if automatons.can_go_next(autostate, newstatus['coverage']) and autostate['next_state']:
+                                                newstatus['automatons'] = autostate['next_state']
                                         else:
                                             len_covered = 0
                                         assert len_covered == j
                                         if len(words_p) > 1:
-                                            newstatus[1] = ["limited", words_p[1:]]
+                                            newstatus['limit'] = ["limited", words_p[1:]]
                                         else:
-                                            newstatus[1] = ["normal", ""]
-                                        newstatus[2] += math.log(prob_align)
+                                            newstatus['limit'] = ["normal", ""]
+                                        newstatus['align_prob'] += math.log(prob_align)
                                         if params.keep_status_num == 1: 
                                             new = [(element[0]+' '+words_p[0]).strip(), newstatus, new_state[i], last_pos, new_loss]
                                         else:
@@ -1212,12 +1224,14 @@ def main(args):
                                         if pos >= 0:
                                             len_covered = pos_end-pos+1
                                             for p in range(pos, pos_end+1):
-                                                newstatus[0][p] = 1
+                                                newstatus['coverage'][p] = 1
+                                            if automatons.can_go_next(autostate, newstatus['coverage']) and autostate['next_state']:
+                                                newstatus['automatons'] = autostate['next_state']
                                         else:
                                             len_covered = 0
                                         assert len_covered == j
-                                        newstatus[1] = ["limited", words_p[1:]]
-                                        newstatus[2] += math.log(prob_align)
+                                        newstatus['limit'] = ["limited", words_p[1:]]
+                                        newstatus['align_prob'] += math.log(prob_align)
                                         if params.keep_status_num == 1: 
                                             new = [(element[0]+' '+words_p[0]).strip(), newstatus, new_state[i], last_pos, new_loss]
                                         else:
@@ -1291,7 +1305,7 @@ def main(args):
                 words_trg = finished[0][0].replace(' <eos>', '').strip().split(' ')
                 now = stacks[lastpos[0]][lastpos[1]][lastpos[2]]
                 while True:
-                    last_cov = now[1][0]
+                    last_cov = now[1]['coverage']
                     last_words = len(now[0].split(' '))
                     lastpos = now[3]
                     print('lastpos:', lastpos)
@@ -1302,7 +1316,7 @@ def main(args):
                     now = stacks[lastpos[0]][lastpos[1]][lastpos[2]]
                     src_word = ''
                     for i in range(len(last_cov)):
-                        if last_cov[i] == 1 and now[1][0][i] == 0:
+                        if last_cov[i] == 1 and now[1]['coverage'][i] == 0:
                             src_word += ' '+words[i]
                     if src_word == '':
                         src_word = '<null>'
