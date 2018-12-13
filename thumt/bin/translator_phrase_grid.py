@@ -948,7 +948,6 @@ def main(args):
                         #print_stack(stacks_limit[length][num_cov])
                     for i in range(len(stacks[length][num_cov])):
                         element = stacks[length][num_cov][i]
-                        print('num_state:', element[1]['automatons'])
                         autostate = autom['states'][element[1]['automatons']]
                         if not can_addstack(stacks[length][num_cov+1], element[-1], params.beam_size):
                             continue
