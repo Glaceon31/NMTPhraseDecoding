@@ -46,6 +46,8 @@ def parse_args():
                         help="probability for source word to null")
     parser.add_argument("--null2trg", type=str,
                         help="vocabulary for null to target word")
+    parser.add_argument("--goldphrase", type=str,
+                        help="golden phrase table")
     parser.add_argument("--ngram", type=int, default=4,
                         help="ngram length")
     parser.add_argument("--parameters", type=str,
@@ -474,6 +476,18 @@ def load_null2trg(n2tfile):
     return result
 
 
+def load_goldphrase(goldfile):
+    content = open(goldfile, 'r').read()
+    pairs = content.split('\n')
+    if pairs[-1] == '':
+        del pairs[-1]
+    result = {}
+    for pair in pairs:
+        src, trg = pair.split('\t')
+    result[src] = trg
+    return result
+    
+
 def getstate(encoderstate, num_layers):
     result = {"layer_%d" % i: encoderstate["decoder"]["layer_%d" % i]
               for i in range(num_layers)}
@@ -772,6 +786,9 @@ def main(args):
         if args.null2trg:
             null2trg_vocab = load_null2trg(args.null2trg)
             print('null2trg vocab:', null2trg_vocab)
+        if args.goldphrase:
+            goldphrase = load_goldphrase(args.goldphrase)
+            print('golden phrase:', goldphrase)
 
         # Load ivocab
         ivocab_src = build_ivocab(params.vocabulary["source"])
