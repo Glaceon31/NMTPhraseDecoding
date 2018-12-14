@@ -93,6 +93,7 @@ def default_parameters():
         src2null_loss=True,
         split_limited=False,
         allow_src2stop=True,
+        use_golden=True,
         punc_border=False,
         cut_ending=False,
         cut_threshold=4.
@@ -294,15 +295,39 @@ def filter_stop(phrases, stopword_list):
     return result
 
 
-def subset(phrases, words, ngram, params, cov=None, rbpe=False, stopword_list=None):
+def subset(phrases, words, ngram, params, cov=None, rbpe=False, stopword_list=None, goldphrase=None):
     result = {}
     covered = [0] * len(words)
+    golden = [0] * len(words)
+    found_gold = [] # [start, end, src, trg]
+    if goldphrase:
+        i = 0
+        while i < len(words):
+            for j in range(i+1, len(words)+1):
+                phrase = ' '.join(words[i:j])
+                if goldphrase.has_key(phrase):
+                    #print('tmp:', phrase)
+                    if j+1 >= len(words) or (j+1 < len(words) and not goldphrase.has_key(' '.join(words[i:(j+1)]))):
+                        new_gold = [i, j, phrase, goldphrase[phrase]]
+                        found_gold.append(new_gold)
+                        for k in range(i, j):
+                            golden[k] =1
+                        i = j
+                        result[phrase] = [[goldphrase[phrase], 1.]]
+                        break
+            i += 1
+    print('found gold:', found_gold)
+
     for i in range(len(words)):
+        if golden[i] == 1:
+            continue
         if cov:
             if cov[i] != 0:
                 continue
         for j in range(i+1, min(i+ngram+1, len(words)+1)):
-            if cov :
+            if golden[j-1] == 1:
+                break
+            if cov:
                 if cov[j-1] != 0:
                     break
             phrase = ' '.join(words[i:j])
@@ -337,9 +362,9 @@ def subset(phrases, words, ngram, params, cov=None, rbpe=False, stopword_list=No
                     result_rbpe[words_rbpe[i]].append([words_rbpe[i], 1.0])
             else:
                 result_rbpe[words_rbpe[i]] = [[words_rbpe[i], 1.0]]
-        return result_rbpe
+        return result_rbpe, golden
     else:
-        return result
+        return result, golden
 
 
 def print_phrases(phrases):
@@ -493,7 +518,9 @@ def load_goldphrase(goldfile):
     result = {}
     for pair in pairs:
         src, trg = pair.split('\t')
-    result[src] = trg
+        src = src.decode('utf-8')
+        trg = trg.decode('utf-8')
+        result[src] = trg
     return result
     
 
@@ -560,16 +587,18 @@ def get_status(element, params):
         return [json.loads(i) for i in element[1].keys()] 
 
 
-def get_kmax(sorted_array, avail, num, visible=None):
+def get_kmax(sorted_array, avail, num, visible=None, golden=None):
     result = []
     pos = 0
     while len(result) < num and pos < len(sorted_array):
         if avail[sorted_array[pos]] == 0:
             if visible:
                 if sorted_array[pos] in visible:
-                    result.append(sorted_array[pos])
+                    if golden[sorted_array[pos]] == 0:
+                        result.append(sorted_array[pos])
             else:
-                result.append(sorted_array[pos])
+                if golden[sorted_array[pos]] == 0:
+                    result.append(sorted_array[pos])
         pos += 1
     return result
 
@@ -795,7 +824,8 @@ def main(args):
         if args.null2trg:
             null2trg_vocab = load_null2trg(args.null2trg)
             print('null2trg vocab:', null2trg_vocab)
-        if args.goldphrase:
+        goldphrase = None
+        if params.use_golden:
             goldphrase = load_goldphrase(args.goldphrase)
             print('golden phrase:', goldphrase)
 
@@ -901,11 +931,12 @@ def main(args):
             encoder_state = sess.run(enc, feed_dict=feed_src)
 
             # generate a subset of phrase table for current translation
-            phrases = subset(phrase_table, words, args.ngram, params, rbpe=args.rbpe, stopword_list=null2trg_vocab)
+            phrases, golden = subset(phrase_table, words, args.ngram, params, rbpe=args.rbpe, stopword_list=null2trg_vocab, goldphrase=goldphrase)
             phrases_reverse = reverse_phrase(phrases)
             #print('reverse phrase:', phrases_reverse)
             print('source:', src.encode('utf-8'))
             if args.verbose:
+                print('golden:', golden)
                 print('probs_null:', probs_null)
             if args.rbpe:
                 words = reverse_bpe(src).split(' ')
@@ -952,20 +983,23 @@ def main(args):
             count_test_tag = [0]*10
             while True:
                 # source to null
+                stacks = append_empty(stacks, length+1, len_src+1)
+                stacks_limit = append_empty(stacks_limit, length+1, len_src+1)
                 if args.verbose:
                     print('=== length:',length,'===')
                     print('== src2null ==')
                 all_empty = True
                 for num_cov in range(0, len_src+1):
                     time_null_start = time.time()
+                    while len(stacks[length]) < num_cov+2:
+                        stacks[length].append([])
+                    while len(stacks_limit[length]) < num_cov+2:
+                        stacks_limit[length].append([])
                     if len(stacks[length][num_cov]) == 0:
                         continue
                     if args.verbose:
                         print('=',num_cov,'=')
                     all_empty = False
-                    if len(stacks[length]) < num_cov+2:
-                        stacks[length].append([])
-                        stacks_limit[length].append([])
 
                     if args.verbose:
                         print('normal')
@@ -981,7 +1015,7 @@ def main(args):
                             if status['limit'][0] == 'limited':
                                 continue
                             time_st = time.time()
-                            for nullpos in get_kmax(null_order, status['coverage'], params.beam_size, visible=autostate['visible']):
+                            for nullpos in get_kmax(null_order, status['coverage'], params.beam_size, visible=autostate['visible'], golden=golden):
                                 assert status['coverage'][nullpos] == 0
                                 if params.src2null_loss:
                                     new_loss = element[-1]+my_log(probs_null[nullpos])
@@ -1151,7 +1185,7 @@ def main(args):
                                         pos_end = pos
                                         if status['coverage'][pos_end] == 1:
                                             continue
-                                        while pos_end+1 in visible and  status['coverage'][pos_end+1] == 0 and words[pos_end].endswith('@@'):
+                                        while pos_end+1 in visible and  status['coverage'][pos_end+1] == 0 :#and words[pos_end].endswith('@@'):
                                             pos_end += 1
                                         if pos_end > pos:
                                             bpe_phrase = ' '.join(words[pos:pos_end+1])
