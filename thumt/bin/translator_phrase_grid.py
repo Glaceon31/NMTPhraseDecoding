@@ -401,6 +401,15 @@ def find_translate(now, previous, nowst, lastst, words_src):
     return 
 
 
+def clean(stacks, i):
+    if i < 0:
+        return stacks
+    for j in range(len(stacks[i])):
+        for k in range(len(stacks[i][j])):
+            stacks[i][j][k][2] = None
+    return stacks
+
+
 def generate_new(words_src, phrases, stack, length):
     result = []
     for tmp in stack:
@@ -1266,6 +1275,8 @@ def main(args):
                     #print('=',len_src, '=')
                     #print_stack(stacks[length][len_src])
                     print_stack_finished(finished)
+                stacks = clean(stacks, length-1)
+                stacks_limit = clean(stacks_limit, length-1)
                 length += 1
                 #if length == 2:
                 #    exit()
