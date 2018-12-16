@@ -300,7 +300,7 @@ def subset(phrases, words, ngram, params, cov=None, rbpe=False, stopword_list=No
     covered = [0] * len(words)
     golden = [0] * len(words)
     found_gold = [] # [start, end, src, trg]
-    if goldphrase:
+    if params.use_golden:
         i = 0
         while i < len(words):
             for j in range(i+1, len(words)+1):
@@ -343,6 +343,8 @@ def subset(phrases, words, ngram, params, cov=None, rbpe=False, stopword_list=No
         if cov:
             if cov[i] != 0:
                 continue
+        if golden[i] == 1:
+            continue
         if result.has_key(words[i]):
             if not [words[i], 1.0] in result[words[i]]:
                 result[words[i]].append([words[i], 1.0])
@@ -998,7 +1000,7 @@ def main(args):
                     if len(stacks[length][num_cov]) == 0:
                         continue
                     if args.verbose:
-                        print('=',num_cov,'=')
+                        print('=',length,'/',num_cov,'=')
                     all_empty = False
 
                     if args.verbose:
@@ -1206,6 +1208,8 @@ def main(args):
                                     #generate from source word
                                     if status['coverage'][pos] == 0:
                                         all_covered = False
+                                        if not phrases.has_key(words[pos]):
+                                            continue
                                         num_total = len(phrases[words[pos]])
                                         for j in range(num_total):
                                             count_test[5] += 1
