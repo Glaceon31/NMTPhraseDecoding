@@ -295,8 +295,17 @@ def filter_stop(phrases, stopword_list):
     return result
 
 
+def transform_gold(phrase):
+    words = phrase.split(' ')
+    for i in range(len(words)-1):
+        if not words[i].endswith('@@'):
+            words[i] = words[i] + '@@'
+    return ' '.join(words)
+
+
 def subset(phrases, words, ngram, params, cov=None, rbpe=False, stopword_list=None, goldphrase=None):
     result = {}
+    words_result = copy.deepcopy(words)
     covered = [0] * len(words)
     golden = [0] * len(words)
     found_gold = [] # [start, end, src, trg]
@@ -312,8 +321,11 @@ def subset(phrases, words, ngram, params, cov=None, rbpe=False, stopword_list=No
                         found_gold.append(new_gold)
                         for k in range(i, j):
                             golden[k] =1
+                        for k in range(i, j-1):
+                            if not words[k].endswith('@@'):
+                                words_result[k] = words_result[k]+'@@'
                         i = j
-                        result[phrase] = [[goldphrase[phrase], 1.]]
+                        result[transform_gold(phrase)] = [[goldphrase[phrase], 1.]]
                         break
             i += 1
     print('found gold:', found_gold)
@@ -364,9 +376,9 @@ def subset(phrases, words, ngram, params, cov=None, rbpe=False, stopword_list=No
                     result_rbpe[words_rbpe[i]].append([words_rbpe[i], 1.0])
             else:
                 result_rbpe[words_rbpe[i]] = [[words_rbpe[i], 1.0]]
-        return result_rbpe, golden
+        return result_rbpe, golden, words_result
     else:
-        return result, golden
+        return result, golden, words_result
 
 
 def print_phrases(phrases):
@@ -933,7 +945,8 @@ def main(args):
             encoder_state = sess.run(enc, feed_dict=feed_src)
 
             # generate a subset of phrase table for current translation
-            phrases, golden = subset(phrase_table, words, args.ngram, params, rbpe=args.rbpe, stopword_list=null2trg_vocab, goldphrase=goldphrase)
+            phrases, golden, words_result = subset(phrase_table, words, args.ngram, params, rbpe=args.rbpe, stopword_list=null2trg_vocab, goldphrase=goldphrase)
+            words = words_result
             phrases_reverse = reverse_phrase(phrases)
             #print('reverse phrase:', phrases_reverse)
             print('source:', src.encode('utf-8'))
@@ -1187,7 +1200,7 @@ def main(args):
                                         pos_end = pos
                                         if status['coverage'][pos_end] == 1:
                                             continue
-                                        while pos_end+1 in visible and  status['coverage'][pos_end+1] == 0 :#and words[pos_end].endswith('@@'):
+                                        while pos_end+1 in visible and  status['coverage'][pos_end+1] == 0 and words[pos_end].endswith('@@'):
                                             pos_end += 1
                                         if pos_end > pos:
                                             bpe_phrase = ' '.join(words[pos:pos_end+1])
@@ -1316,6 +1329,8 @@ def main(args):
                 stacks = clean(stacks, length-1)
                 stacks_limit = clean(stacks_limit, length-1)
                 length += 1
+                if length > len_src+params.decode_length:
+                    break
                 #if length == 2:
                 #    exit()
 
@@ -1344,7 +1359,10 @@ def main(args):
 
                 print('loss:', loss)
             else:
-                result = finished[0][0]
+                if len(finished) > 0:
+                    result = finished[0][0]
+                else: 
+                    result = ''
 
             fout.write((result.replace(' <eos>', '').strip()+'\n').encode('utf-8'))
             print((result.replace(' <eos>', '').strip()).encode('utf-8'))

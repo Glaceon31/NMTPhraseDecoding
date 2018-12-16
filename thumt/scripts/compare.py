@@ -20,7 +20,7 @@ def parseargs():
     parser.add_argument("--hypo", type=str, required=True)
     parser.add_argument("--baseline", type=str, required=True)
     parser.add_argument("--compare", type=str)
-    parser.add_argument("--oracle", type=str, required=True)
+    #parser.add_argument("--oracle", type=str, required=True)
     parser.add_argument("--refs", type=str, required=True, nargs="+")
     parser.add_argument("--senid", type=int, default=-1)
     return parser.parse_args()
