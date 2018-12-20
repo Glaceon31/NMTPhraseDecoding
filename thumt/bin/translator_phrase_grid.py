@@ -667,7 +667,8 @@ def add_stack(stack, element, beam_size, merge_status=None, max_status=1):
                 if max_status == 1:
                     st = element[1]
                     if element[1]['align_prob'] > stack[i][1]['align_prob']:
-                        stack[i] = element
+                        stack[i][1] = element[1]
+                        stack[i][3] = element[3]
                 else:
                     st = element[1].keys()[0]
                     if not stack[i][1].has_key(st):

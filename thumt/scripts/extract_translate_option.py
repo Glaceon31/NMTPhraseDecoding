@@ -37,19 +37,24 @@ def rbpe(inp):
 
 if __name__ == "__main__":
     args = parseargs()
-    content = open(args.input, 'r').read()
-    lines = content.split('\n')
-    if lines[-1].strip() == '':
-        del lines[-1]
+    content = open(args.input, 'r')
     result = {}
     count = 0
     findmax = False
     current_src = ''
     current_trg = []
-    num = 0
-    for line in lines:
+    num = 0 
+    line = content.readline()
+    while line:
+        line = line.strip()
         count += 1
-        src, trg, probs, align, counts, _ = line.split(' ||| ')
+        try:
+            src, trg, probs, align, counts, _ = line.split(' ||| ')
+        except:
+            print('line', count, 'bad')
+            print(line)
+            count += 1
+            continue
         if findmax:
             if src != current_src: 
                 result[current_src] = get_options(current_trg, args)
@@ -64,6 +69,7 @@ if __name__ == "__main__":
             current_trg.append([trg, probs])
         if count % 100000 == 0:
             print(num, '/', count)
+        line = content.readline()
     json.dump(result, open(args.output, 'w'))
 
 
