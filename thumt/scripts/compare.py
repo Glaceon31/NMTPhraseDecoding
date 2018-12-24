@@ -20,6 +20,7 @@ def parseargs():
     parser.add_argument("--hypo", type=str, required=True)
     parser.add_argument("--baseline", type=str, required=True)
     parser.add_argument("--compare", type=str)
+    parser.add_argument("--hidden", action="store_true")
     #parser.add_argument("--oracle", type=str, required=True)
     parser.add_argument("--refs", type=str, required=True, nargs="+")
     parser.add_argument("--senid", type=int, default=-1)
@@ -66,6 +67,8 @@ if __name__ == "__main__":
 
     for i in range(len(lsrc)):
         reftmp = [t[i] for t in lrefs]
+        if args.hidden and args.compare and lhypo[i] == lcompare[i]:
+            continue
         print('=== %d ===' %i)
         print('src:', lsrc[i])
         print('ours:', lhypo[i], '('+str(bleu(rbpe(lhypo[i]), reftmp, 4, verbose=True))+')')

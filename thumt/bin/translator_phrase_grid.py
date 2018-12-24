@@ -46,6 +46,8 @@ def parse_args():
                         help="probability for source word to null")
     parser.add_argument("--null2trg", type=str,
                         help="vocabulary for null to target word")
+    parser.add_argument("--stoplist", type=str,
+                        help="stopword list banned from generation")
     parser.add_argument("--goldphrase", type=str,
                         help="golden phrase table")
     parser.add_argument("--ngram", type=int, default=4,
@@ -666,7 +668,11 @@ def add_stack(stack, element, beam_size, merge_status=None, max_status=1):
             if element[0] == stack[i][0]: 
                 if max_status == 1:
                     st = element[1]
-                    if element[1]['align_prob'] > stack[i][1]['align_prob']:
+                    if stack[i][-1] < element[-1]:
+                        stack[i][1] = element[1]
+                        stack[i][3] = element[3]
+                        stack[i][-1] = element[-1]
+                    elif stack[i][-1] == element[-1] and element[1]['align_prob'] > stack[i][1]['align_prob']:
                         stack[i][1] = element[1]
                         stack[i][3] = element[3]
                 else:
@@ -770,8 +776,16 @@ def get_translate_status(words_src, phrases, phrases_reverse, part, ngrams):
     return can_finish, options
 
 
+def get_src2null_prob(src2null_prob, word):
+    if src2null_prob.has_key(word):
+        return src2null_prob[word][2]
+    else:
+        return 0.
+
+
 def get_lp(length, alpha):
     return math.pow((5.0 + length) / 6.0, alpha)
+
 
 time_totalsp = 0
 def to_finish(state, alpha):
@@ -839,6 +853,8 @@ def main(args):
         if args.null2trg:
             null2trg_vocab = load_null2trg(args.null2trg)
             print('null2trg vocab:', null2trg_vocab)
+        stoplist = load_null2trg(args.stoplist)
+        print('stoplist:', stoplist)
         goldphrase = None
         if params.use_golden:
             goldphrase = load_goldphrase(args.goldphrase)
@@ -933,7 +949,7 @@ def main(args):
             src = src.decode('utf-8')
             words = src.split(' ')
             len_src = len(words)
-            probs_null = [src2null_prob[w][2] for w in words]
+            probs_null = [get_src2null_prob(src2null_prob, w) for w in words]
             null_order = sorted_index(probs_null)
             f_src = {}
             f_src["source"] = [getid(ivocab_src, input) ]
@@ -946,7 +962,7 @@ def main(args):
             encoder_state = sess.run(enc, feed_dict=feed_src)
 
             # generate a subset of phrase table for current translation
-            phrases, golden, words_result = subset(phrase_table, words, args.ngram, params, rbpe=args.rbpe, stopword_list=null2trg_vocab, goldphrase=goldphrase)
+            phrases, golden, words_result = subset(phrase_table, words, args.ngram, params, rbpe=args.rbpe, stopword_list=stoplist, goldphrase=goldphrase)
             words = words_result
             phrases_reverse = reverse_phrase(phrases)
             #print('reverse phrase:', phrases_reverse)
@@ -1028,6 +1044,8 @@ def main(args):
                         if not can_addstack(stacks[length][num_cov+1], element[-1], params.beam_size):
                             continue
                         for status in get_status(element, params):
+                            if element[0] == 'the two sides agreed to negotiate in geneva in late':
+                                print('testing:', element[-2:])
                             if status['limit'][0] == 'limited':
                                 continue
                             time_st = time.time()
@@ -1055,6 +1073,8 @@ def main(args):
                                 else:
                                     new = [element[0], {json.dumps(newstatus):1}, element[2], last_pos, new_loss]
                                 stacks[length][num_cov+1] = add_stack(stacks[length][num_cov+1], new,params.beam_size, params.merge_status, params.keep_status_num)
+                                if new[0] == 'the two sides agreed to negotiate in geneva in late':
+                                    print('testing 2:', new[-2:])
                                 break
                             time_ed = time.time()
                     time_null_end = time.time()
@@ -1201,24 +1221,24 @@ def main(args):
                                         pos_end = pos
                                         if status['coverage'][pos_end] == 1:
                                             continue
-                                        while pos_end+1 in visible and  status['coverage'][pos_end+1] == 0 and words[pos_end].endswith('@@'):
+                                        while pos_end+1 in visible and  status['coverage'][pos_end+1] == 0 and pos_end-pos < 3:#and words[pos_end].endswith('@@'):
                                             pos_end += 1
-                                        if pos_end > pos:
-                                            bpe_phrase = ' '.join(words[pos:pos_end+1])
-                                            len_bpe_phrase = pos_end-pos+1
-                                            if phrases.has_key(bpe_phrase):
-                                                # start translation
-                                                for j in range(len(phrases[bpe_phrase])):
-                                                    # warning: need to build seperate candidate list for different number of covered words 
-                                                    count_test[4] += 1
-                                                    phrase, prob_align = phrases[bpe_phrase][j]
-                                                    words_p = phrase.split(' ')
-                                                    new_loss = log_probs[i][getid_word(ivocab_trg, words_p[0])]
-                                                    new_candidate = [phrase, pos, pos_end, new_loss, prob_align]
-                                                    if params.split_limited and len(words_p) > 1:
-                                                        candidate_phrase_list_limit[len_bpe_phrase] = add_candidate_limit(candidate_phrase_list_limit[len_bpe_phrase], new_candidate, params)
-                                                    else:
-                                                        candidate_phrase_list[len_bpe_phrase] = add_candidate(candidate_phrase_list[len_bpe_phrase], new_candidate, params)
+                                            if pos_end > pos:
+                                                bpe_phrase = ' '.join(words[pos:pos_end+1])
+                                                len_bpe_phrase = pos_end-pos+1
+                                                if phrases.has_key(bpe_phrase):
+                                                    # start translation
+                                                    for j in range(len(phrases[bpe_phrase])):
+                                                        # warning: need to build seperate candidate list for different number of covered words 
+                                                        count_test[4] += 1
+                                                        phrase, prob_align = phrases[bpe_phrase][j]
+                                                        words_p = phrase.split(' ')
+                                                        new_loss = log_probs[i][getid_word(ivocab_trg, words_p[0])]
+                                                        new_candidate = [phrase, pos, pos_end, new_loss, prob_align]
+                                                        if params.split_limited and len(words_p) > 1:
+                                                            candidate_phrase_list_limit[len_bpe_phrase] = add_candidate_limit(candidate_phrase_list_limit[len_bpe_phrase], new_candidate, params)
+                                                        else:
+                                                            candidate_phrase_list[len_bpe_phrase] = add_candidate(candidate_phrase_list[len_bpe_phrase], new_candidate, params)
                                     #generate from source word
                                     if status['coverage'][pos] == 0:
                                         all_covered = False

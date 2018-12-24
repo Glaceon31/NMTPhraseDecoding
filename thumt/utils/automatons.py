@@ -16,7 +16,7 @@ import numpy as np
 import math
 import time
 
-puncfile = '/data/zjctmp/ACL2019/external/puncs_nocomma'
+puncfile = '/data/zjctmp/ACL2019/external/puncs'
 
 def load_punc(puncfile):
     content = open(puncfile, 'r').read()
