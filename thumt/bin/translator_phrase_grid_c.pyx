@@ -21,8 +21,6 @@ import numpy as np
 import math
 import time
 
-import pyximport; pyximport.install()
-
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Translate using existing NMT models",
@@ -64,6 +62,8 @@ def parse_args():
                         help="")
     parser.add_argument("--time", action="store_true", 
                         help="")
+
+
 
     return parser.parse_args()
 
@@ -942,6 +942,10 @@ def main(args):
         count = 0
 
         for input in inputs:
+            time_test = [0]*20
+            time_test_tag = [0]*20
+            count_test = [0]*20
+            count_test_tag = [0]*20
             count += 1
             print(count)
             start = time.time()
@@ -959,7 +963,12 @@ def main(args):
                 placeholder["source"]: f_src["source"],
                 placeholder["source_length"] : f_src["source_length"]
             }
+            time_enc_start = time.time()
+            time_test[-1] = time_enc_start-start
+            time_test_tag[-1] = "before_encode"
             encoder_state = sess.run(enc, feed_dict=feed_src)
+            time_enc_end = time.time()
+            time_encode = time_enc_end-time_enc_start
 
             # generate a subset of phrase table for current translation
             phrases, golden, words_result = subset(phrase_table, words, args.ngram, params, rbpe=args.rbpe, stopword_list=stoplist, goldphrase=goldphrase)
@@ -1010,10 +1019,10 @@ def main(args):
             time_null = 0
             time_generate = 0
             time_limit = 0
-            time_test = [0]*20
-            time_test_tag = [0]*20
-            count_test = [0]*20
-            count_test_tag = [0]*20
+            time_prepare_end = time.time()
+            time_prepare = time_prepare_end-start
+            time_test[-2] = time_prepare_end-time_enc_end
+            time_test_tag[-2] = "after encoder before decode"
             while True:
                 # source to null
                 time_null_start = time.time()
@@ -1461,6 +1470,8 @@ def main(args):
             end = time.time()
             global time_totalsp
             if args.time:
+                print('time encode & prepare', time_prepare, 's')
+                print('time encode neural', time_encode, 's')
                 print('time total null:', time_null, 's')
                 print('time total neural:', time_neural, 's')
                 print('time total generate:', time_generate, 's')
