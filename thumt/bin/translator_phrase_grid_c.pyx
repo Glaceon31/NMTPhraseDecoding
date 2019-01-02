@@ -271,7 +271,7 @@ def read_files(names):
 
 
 cdef get_feature_map(translation_status stack[100][4], int *stack_count, translation_status *stack_limit[100], int *stack_limit_count, int len_src, ivocab_trg, hidden_state_pool, params):
-    printf('get_feature_map\n')
+    #printf('get_feature_map\n')
     features = {}
     maps = []
     maps_limit = []
@@ -745,7 +745,6 @@ cdef beam add_stack(translation_status *stack, int stack_count, translation_stat
                         stack[i].loss = element.loss
                         j = i
                         while j > 0 and stack[j].loss > stack[j-1].loss:
-                            print()
                             tmp = stack[j-1]
                             stack[j-1] = stack[j]
                             stack[j] = tmp
@@ -1233,7 +1232,7 @@ def main(args):
                     break
 
                 # do the neural
-                printf('start neural prepare\n')
+                #printf('start neural prepare\n')
                 time_neural_start = time.time()
                 neural_result = [0]*(len_src+1)
                 neural_result_limit = [0]*(len_src+1)
@@ -1258,7 +1257,7 @@ def main(args):
                 time_test[2] += time_2e-time_neural_start
                 time_test_tag[2] = "neural_prepare"
 
-                printf('start neural\n')
+                #printf('start neural\n')
                 log_probs, new_state = sess.run(dec, feed_dict=feed_dict)
                 time_3e = time.time()
                 time_test[3] += time_3e-time_2e
@@ -1287,9 +1286,9 @@ def main(args):
                 # update the stacks
                 if args.verbose:
                     printf('== generation ==\n')
+                    printf('generate from limited\n')
                 time_generate_start = time.time()
                 # limited stack
-                printf('generate from limited\n')
                 for num_cov in range(0, len_src+1):
                     #printf('= limit %d =\n', num_cov)
                     if neural_result_limit[num_cov] == 0:
@@ -1377,7 +1376,7 @@ def main(args):
                 time_limit += time_limit_end-time_generate_start
 
                 #generate new options (unlimited)
-                printf('generating new options (unlimited)\n')
+                #printf('generating new options (unlimited)\n')
                 for num_cov in range(0, len_src+1):
                     #print('= normal', num_cov, '=')
                     if neural_result[num_cov] == 0:
