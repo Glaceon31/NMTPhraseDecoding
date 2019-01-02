@@ -689,7 +689,8 @@ def add_stack(stack, element, beam_size, merge_status=None, max_status=1):
                                 if pnew > pmin:
                                     stack[i][1][st] = 1
                                     del stack[i][1][whichmin]
-                return stack
+                result = sorted(stack, key=lambda x:x[-1], reverse=True)
+                return result
     else:
         for i in range(len(stack)):
             if element[0] == stack[i][0]: 
@@ -1301,7 +1302,7 @@ def main(args):
 
                                 #if args.verbose:
                                 #    print('current:', element[0].encode('utf-8'), element[1], element[-1])
-                                #   print('candidates:', candidate_phrase_list)
+                                #    print('candidates:', candidate_phrase_list)
 
                                 time_candidate_start = time.time()
                                 for j in range(len(candidate_phrase_list)):
