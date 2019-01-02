@@ -50,12 +50,6 @@ cdef struct translation_status:
     float loss
 
 
-cdef copy_ts_list(translation_status* a, translation_status* b, int num):
-    cdef int i
-    for i in range(num):
-        a[i] = b[i]
-
-
 cdef translation_status copy_translation_status(translation_status old, int len_src):
     cdef translation_status new
     new = old
@@ -422,19 +416,24 @@ def subset(phrases, words, ngram, params, cov=None, rbpe=False, stopword_list=No
                 for k in range(i, j):
                     covered[k] = 1
     # special treatment for words with no phrase
-    '''
     for i in range(len(words)):
         if cov:
             if cov[i] != 0:
                 continue
         if golden[i] == 1:
             continue
+        '''
         if result.has_key(words[i]):
             if not [words[i], 1.0] in result[words[i]]:
                 result[words[i]].append([words[i], 1.0])
         else:
             result[words[i]] = [[words[i], 1.0]]
-    '''
+        '''
+        if result.has_key(words[i]):
+            if not ['<oov>', 1.0] in result[words[i]]:
+                result[words[i]].append(['<oov>', 1.0])
+        else:
+            result[words[i]] = [['<oov>', 1.0]]
             
     if rbpe:
         result_rbpe = {}
@@ -473,6 +472,7 @@ cdef print_stack(translation_status *stack, int len_src, int count):
         for j in range(len_src):
             printf('%d ',stack[i].coverage[j])
         printf(']\n')
+        printf('align_loss: %f\n', stack[i].align_loss)
         printf('previous: [%d %d %d]\n', stack[i].previous[0], stack[i].previous[1], stack[i].previous[2])
         printf('loss: %f\n\n', stack[i].loss)
 
@@ -708,6 +708,12 @@ def get_align_prob(status):
     return tmp['align_prob']
 
 
+cdef int is_equal(float a, float b):
+    if abs(a-b) < 1e-6:
+        return 1
+    return 0
+
+
 cdef beam add_stack_limited(translation_status *stack_limit, int stack_limit_count, translation_status element, params):
     cdef beam result
     stack_limit[stack_limit_count] = element
@@ -722,6 +728,8 @@ cdef beam add_stack(translation_status *stack, int stack_count, translation_stat
     cdef int j
     cdef translation_status tmp
     cdef beam result
+    if strcmp(element.translation, 'after the peace summit between leaders of south and north korea in 2000 ,') == 0:
+        printf('testing: %f; %f\n', element.loss, element.align_loss)
     if verbose == 1:
         printf('add stack: %s\n', element.translation)
         printf('stack count %d/%d\n', stack_count, beam_size)
@@ -735,6 +743,7 @@ cdef beam add_stack(translation_status *stack, int stack_count, translation_stat
             if strcmp(element.translation, stack[i].translation) == 0: 
                 #printf("add stack found same %d\n", i)
                 if max_status == 1:
+                    #assert stack[i].loss == element.loss
                     if stack[i].loss < element.loss:
                         stack[i].coverage = element.coverage
                         stack[i].align_loss = element.align_loss
@@ -749,7 +758,7 @@ cdef beam add_stack(translation_status *stack, int stack_count, translation_stat
                             stack[j-1] = stack[j]
                             stack[j] = tmp
                             j -= 1
-                    elif stack[i].loss == element.loss and element.align_loss > stack[i].align_loss:
+                    elif is_equal(stack[i].loss, element.loss) == 1 and element.align_loss > stack[i].align_loss:
                         stack[i].coverage = element.coverage
                         stack[i].align_loss = element.align_loss
                         stack[i].automatons = element.automatons
@@ -928,7 +937,7 @@ def main(args):
         # universal
         int max_len_trg = 100
         int max_len_src = 100
-        int max_limit = 300
+        int max_limit = 10000
         int i, j, len_tmp, pos, offset
         char *tmpstring
         # encode & prepare
@@ -952,6 +961,7 @@ def main(args):
         float new_align_loss
         # neural
         # generation
+        int len_covered
         beam add_result
         char* tmpstr2
         char* newbuffer
@@ -1096,6 +1106,7 @@ def main(args):
             words = words_result
             phrases_reverse = reverse_phrase(phrases)
             #print('reverse phrase:', phrases_reverse)
+            print(count)
             print('source:', src.encode('utf-8'))
             if args.verbose:
                 print('golden:', golden)
@@ -1149,6 +1160,7 @@ def main(args):
             stacks_limit_count = [[0]*100]*100
             for i in range(100):
                 for j in range(100):
+                    free(stacks_limit[i][j])
                     stacks_limit[i][j] = <translation_status*> malloc(max_limit * sizeof(translation_status))
             finished_count = 0
             length = 0
@@ -1217,6 +1229,7 @@ def main(args):
 
                             newelement.previous = [length, num_cov, i]
                             newelement.loss = new_loss
+                            #printf('%d/%d add to %d/%d\n', length, num_cov, length, num_cov+1)
                             add_result = add_stack(stacks[length][num_cov+1], stacks_count[length][num_cov+1], newelement, params.beam_size, params.merge_status, params.keep_status_num)
                             #stacks[length][num_cov+1] = add_result.content
                             stacks_count[length][num_cov+1] = add_result.count
@@ -1367,6 +1380,7 @@ def main(args):
                                     newelement.limits = ""
                                     newelement.hidden_state_id = new_state_limit_id[i]
                                     newelement.loss = new_loss
+                                    #printf('%d/%d add to %d/%d\n', length, num_cov, length+1, num_cov)
                                     add_result = add_stack(stacks[length+1][num_cov], stacks_count[length+1][num_cov], newelement, params.beam_size, params.merge_status, params.keep_status_num)
                                     stacks_count[length+1][num_cov] = add_result.count
                             time_5e = time.time()
@@ -1561,6 +1575,7 @@ def main(args):
                                             vb = 1
                                         '''
                                         #printf('testing 0.2\n')
+                                        #printf('%d/%d add to %d/%d\n', length, num_cov, length+1, num_cov+len_covered)
                                         add_result = add_stack(stacks[length+1][num_cov+len_covered], stacks_count[length+1][num_cov+len_covered], newelement, params.beam_size, params.merge_status, params.keep_status_num)
                                         #stacks[length+1][num_cov+len_covered] = add_result.content
                                         stacks_count[length+1][num_cov+len_covered] = add_result.count
