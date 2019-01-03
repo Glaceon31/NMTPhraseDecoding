@@ -26,14 +26,70 @@ from cpython cimport array
 import array
 import pyximport
 pyximport.install()
-import thumt.utils.automatons_c as automatons
+import thumt.utils.automatons_c as automatons_o
 from libc.stdio cimport printf
 from libc.string cimport strcpy, strcat, strlen, strcmp, strncpy
 
-cdef int can_go_next(state, int *coverage):
+
+cdef struct automatons_state:
+    int next_state
+    int *visible
+    int num_visible
+
+
+cdef struct automatons:
+    int state_num
+    automatons_state states[10]
+
+
+cdef automatons automatons_build(words_src, punc, params):
+    cdef automatons result
+    cdef int length = len(words_src)
+    cdef int start, i, j
+    if params.punc_border:
+        start = 0
+        for i in range(length):
+            if words_src[i] in punc:
+                result.states[result.state_num].num_visible = i+1-start
+                result.states[result.state_num].visible = <int *> malloc(result.states[result.state_num].num_visible*sizeof(int))
+                for j in range(0, i+1-start):
+                    result.states[result.state_num].visible[j] = j+start
+                result.states[result.state_num].next_state = -1
+                result.state_num += 1
+                start = i+1
+        if start < length:
+            result.states[result.state_num].num_visible = length-start
+            result.states[result.state_num].visible = <int *> malloc(result.states[result.state_num].num_visible*sizeof(int))
+            for j in range(0, length-start):
+                result.states[result.state_num].visible[j] = j+start
+            result.states[result.state_num].next_state = -1
+            result.state_num += 1
+        for i in range(result.state_num-1):
+            result.states[i].next_state = i+1
+    else:
+        result.states[0].num_visible = length
+        result.states[0].visible = <int *> malloc(length*sizeof(int))
+        for i in range(0, length):
+            result.states[0].visible[i] = i
+        result.states[0].next_state = -1
+        result.state_num = 1
+    return result
+
+
+cdef print_autom(automatons autom):
+    cdef int i, j
+    for i in range(autom.state_num):
+        printf("state %d:", i)
+        printf("visible {")
+        for j in range(autom.states[i].num_visible):
+            printf("%d ", autom.states[i].visible[j])
+        printf("} next_state %d\n", autom.states[i].next_state)
+
+
+cdef int can_go_next(automatons_state state, int *coverage):
     cdef int i
-    for i in range(len(state['visible'])):
-        if coverage[state['visible'][i]] == 0:
+    for i in range(state.num_visible):
+        if coverage[state.visible[i]] == 0:
             return 0
     return 1
 
@@ -264,17 +320,15 @@ def read_files(names):
     return inputs
 
 
-cdef get_feature_map(translation_status stack[100][4], int *stack_count, translation_status *stack_limit[100], int *stack_limit_count, int len_src, ivocab_trg, hidden_state_pool, params):
+cdef get_feature_map(translation_status stack[100][4], int *stack_count, translation_status *stack_limit[100], int *stack_limit_count, int len_src, ivocab_trg, hidden_state_pool, params, int maps[100][4], int maps_limit[100][10000]):
     #printf('get_feature_map\n')
     features = {}
-    maps = []
-    maps_limit = []
     sentence_list = []
     new_hidden_pool = []
     cdef int num_cov, pos, idx, i
     cdef translation_status element
     for num_cov in range(len_src+1):
-        maps.append([])
+        #maps.append([])
         for idx in range(stack_count[num_cov]):
             element = stack[num_cov][idx]
             found = 0
@@ -284,15 +338,15 @@ cdef get_feature_map(translation_status stack[100][4], int *stack_count, transla
                     pos = i
                     break
             if found == 1:
-                maps[num_cov].append(pos)
+                maps[num_cov][idx] = pos
             else:
                 sentence_list.append(element.translation)
-                maps[num_cov].append(len(sentence_list)-1)
+                maps[num_cov][idx] = len(sentence_list)-1
                 new_hidden_pool.append(hidden_state_pool[element.hidden_state_id])
     #printf('get_feature_map 0.5')
     for num_cov in range(len_src+1):
         #printf('get_feature_map 0.6: %d/%d\n', num_cov, stack_limit_count[num_cov])
-        maps_limit.append([])
+        #maps_limit.append([])
         for idx in range(stack_limit_count[num_cov]):
             #printf('get_feature_map limit %d/%d\n', num_cov, idx)
             element = stack_limit[num_cov][idx]
@@ -303,10 +357,10 @@ cdef get_feature_map(translation_status stack[100][4], int *stack_count, transla
                     pos = i
                     break
             if found == 1:
-                maps_limit[num_cov].append(pos)
+                maps_limit[num_cov][idx] = pos
             else:
                 sentence_list.append(element.translation)
-                maps_limit[num_cov].append(len(sentence_list)-1)
+                maps_limit[num_cov][idx] = len(sentence_list)-1
                 new_hidden_pool.append(hidden_state_pool[element.hidden_state_id])
 
     sen_ids_list = [getid(ivocab_trg, sentence) for sentence in sentence_list]
@@ -320,7 +374,9 @@ cdef get_feature_map(translation_status stack[100][4], int *stack_count, transla
     features["decoder"] = {}
     for i in range(params.num_decoder_layers):
         features["decoder"]["layer_%d" % i] = merge_tensor(new_hidden_pool, i)
-    return features, maps, maps_limit, len(sentence_list)
+    #print('maps:', maps)
+    #print('maps_limit:', maps_limit)
+    return features, len(sentence_list)
 
 
 def get_feature(sentence_list, ivocab_trg):
@@ -654,16 +710,19 @@ cdef int can_addstack(translation_status *stack, int stack_count, float loss, in
     return 0
 
 
-cdef get_kmax(sorted_array, int *avail, int num, visible=None, golden=None):
+cdef get_kmax(sorted_array, int *avail, int num, automatons_state state, golden=None):
     result = []
     cdef int pos = 0
+    cdef int isvisible = 0
+    cdef int i
     while len(result) < num and pos < len(sorted_array):
         if avail[sorted_array[pos]] == 0:
-            if visible:
-                if sorted_array[pos] in visible:
-                    if golden[sorted_array[pos]] == 0:
-                        result.append(sorted_array[pos])
-            else:
+            isvisible = 0
+            for i in range(state.num_visible):
+                if sorted_array[pos] == state.visible[i]:
+                    isvisible = 1
+                    break
+            if isvisible:
                 if golden[sorted_array[pos]] == 0:
                     result.append(sorted_array[pos])
         pos += 1
@@ -938,8 +997,9 @@ def main(args):
         int max_len_trg = 100
         int max_len_src = 100
         int max_limit = 10000
-        int i, j, len_tmp, pos, offset
+        int i, j, k, len_tmp, pos, offset
         char *tmpstring
+        automatons newautom
         # encode & prepare
         float time_test[20]
         int count_test[20]
@@ -960,11 +1020,15 @@ def main(args):
         float new_loss
         float new_align_loss
         # neural
+        int maps[100][4]
+        int maps_limit[100][10000]
+        int num_x
         # generation
-        int len_covered
+        int len_covered, nosense
         beam add_result
         char* tmpstr2
         char* newbuffer
+        automatons_state autostate
     ###
 
     # Build Graph
@@ -990,6 +1054,10 @@ def main(args):
         if params.use_golden:
             goldphrase = load_goldphrase(args.goldphrase)
             print('golden phrase:', goldphrase)
+        punc = None
+        if params.punc_border:
+            punc = automatons_o.load_punc(args.puncfile)
+            print('puncs:', punc)
 
         # Load ivocab
         ivocab_src = build_ivocab(params.vocabulary["source"])
@@ -1137,8 +1205,10 @@ def main(args):
             5. score
             '''
             #init_status = [coverage, ['normal', ''], 0.]
-            autom = automatons.build(words, params)
-            automatons.print_autom(autom)
+            autom = automatons_build(words, punc, params)
+            print_autom(autom)
+            #autom = automatons_o.build(words, params)
+            #automatons_o.print_autom(autom)
             #init_status = {'coverage': coverage, 'limit': ['normal', ''], 'align_prob': 0., 'automatons': 0}
             #if params.keep_status_num == 1:
             #    element_init = ['', init_status, getstate(encoder_state, params.num_decoder_layers), [0, 0, 0, 0.], 0]
@@ -1194,7 +1264,7 @@ def main(args):
                         #print_stack(stacks_limit[length][num_cov])
                     for i in range(stacks_count[length][num_cov]):
                         element = stacks[length][num_cov][i]
-                        autostate = autom['states'][element.automatons]
+                        autostate = autom.states[element.automatons]
                         if can_addstack(stacks[length][num_cov+1], stacks_count[length][num_cov+1], element.loss, params.beam_size) == 0:
                             continue
                         if element.limited == 1:
@@ -1202,7 +1272,7 @@ def main(args):
                         time_0s = time.time()
                         time_test_tag[0] = 'src2null_inner'
                         # not optimized
-                        kmax = get_kmax(null_order, element.coverage, params.beam_size, visible=autostate['visible'], golden=golden)
+                        kmax = get_kmax(null_order, element.coverage, params.beam_size, autostate, golden=golden)
                         for nullpos in kmax:
                             count_test[0] += 1
                             count_test_tag[0] = 'src2null_inner'
@@ -1224,8 +1294,8 @@ def main(args):
                             newelement = copy_translation_status(element, len_src)
                             newelement.coverage[nullpos] = 1
                             newelement.align_loss = new_align_loss
-                            if can_go_next(autostate, newelement.coverage) == 1 and autostate['next_state']:
-                                newelement.automatons = autostate['next_state']
+                            if can_go_next(autostate, newelement.coverage) == 1 and autostate.next_state != -1:
+                                newelement.automatons = autostate.next_state
 
                             newelement.previous = [length, num_cov, i]
                             newelement.loss = new_loss
@@ -1249,7 +1319,7 @@ def main(args):
                 time_neural_start = time.time()
                 neural_result = [0]*(len_src+1)
                 neural_result_limit = [0]*(len_src+1)
-                features, maps, maps_limit, num_x = get_feature_map(stacks[length], stacks_count[length], stacks_limit[length], stacks_limit_count[length], len_src, ivocab_trg, hidden_state_pool, params)
+                features, num_x = get_feature_map(stacks[length], stacks_count[length], stacks_limit[length], stacks_limit_count[length], len_src, ivocab_trg, hidden_state_pool, params, maps, maps_limit)
                 count_test[2] += num_x
                 count_test_tag[2] = "neural_input"
                 features["encoder"] = np.tile(encoder_state["encoder"], (num_x, 1, 1))
@@ -1278,19 +1348,23 @@ def main(args):
                 new_state = outdims(new_state, params.num_decoder_layers)
                 hidden_state_pool = new_state
                 for num_cov in range(0, len_src+1):
-                    if len(maps[num_cov]) == 0:
+                    if stacks_count[length][num_cov] == 0:
                         continue
                     neural_result[num_cov] = [[], []]
-                    for pos in maps[num_cov]:
+                    for i in range(stacks_count[length][num_cov]):
+                        pos = maps[num_cov][i]
                         neural_result[num_cov][0].append(log_probs[pos])
                         neural_result[num_cov][1].append(pos)
                 for num_cov in range(0, len_src+1):
-                    if len(maps_limit[num_cov]) == 0:
+                    if stacks_limit_count[length][num_cov] == 0:
                         continue
                     neural_result_limit[num_cov] = [[], []]
-                    for pos in maps_limit[num_cov]:
+                    for i in range(stacks_limit_count[length][num_cov]):
+                        pos = maps_limit[num_cov][i]
                         neural_result_limit[num_cov][0].append(log_probs[pos])
                         neural_result_limit[num_cov][1].append(pos)
+                #print('neural_result', neural_result)
+                #print('neural_result_limit', neural_result_limit)
                 time_neural_end = time.time()
                 time_neural += time_neural_end-time_neural_start
                 time_test[4] += time_neural_end-time_3e
@@ -1400,8 +1474,8 @@ def main(args):
                     for i in range(stacks_count[length][num_cov]):
                         element = stacks[length][num_cov][i]
                         for nosense in range(1):
-                            visible = autom['states'][element.automatons]['visible']
-                            autostate = autom['states'][element.automatons]
+                            visible = autom.states[element.automatons].visible
+                            autostate = autom.states[element.automatons]
                             # limit (should not enter)
                             if element.limited == 1: 
                                 assert 0 == 1
@@ -1412,7 +1486,8 @@ def main(args):
                                 candidate_phrase_list = list_of_empty_list(len_src+1)
                                 candidate_phrase_list_limit = list_of_empty_list(len_src+1)
                                 all_covered = True
-                                for pos in visible:
+                                for j in range(autom.states[element.automatons].num_visible):
+                                    pos = visible[j]
                                     # bpe_phrase
                                     time_phrase_start = time.time()
                                     if params.bpe_phrase:
@@ -1420,7 +1495,12 @@ def main(args):
                                         pos_end = pos
                                         if element.coverage[pos_end] == 1:
                                             continue
-                                        while pos_end+1 in visible and element.coverage[pos_end+1] == 0 and pos_end-pos < 3:#and words[pos_end].endswith('@@'):
+                                        is_visible = 0
+                                        for k in range(autom.states[element.automatons].num_visible):
+                                            if pos_end+1 == autom.states[element.automatons].visible[k]:
+                                                is_visible = True
+                                                break
+                                        while is_visible == 1 and element.coverage[pos_end+1] == 0 and pos_end-pos < 3: #and words[pos_end].endswith('@@'):
                                             pos_end += 1
                                             if pos_end > pos:
                                                 bpe_phrase = ' '.join(words[pos:pos_end+1])
@@ -1523,8 +1603,8 @@ def main(args):
                                             len_covered = pos_end-pos+1
                                             for p in range(pos, pos_end+1):
                                                 newelement.coverage[p] = 1
-                                            if can_go_next(autostate, newelement.coverage) and autostate['next_state']:
-                                                newelement.automatons = autostate['next_state']
+                                            if can_go_next(autostate, newelement.coverage) and autostate.next_state != -1:
+                                                newelement.automatons = autostate.next_state
                                         else:
                                             len_covered = 0
                                         assert len_covered == j
@@ -1633,8 +1713,8 @@ def main(args):
                                             len_covered = pos_end-pos+1
                                             for p in range(pos, pos_end+1):
                                                 newelement.coverage[p] = 1
-                                            if can_go_next(autostate, newelement.coverage) and autostate['next_state']:
-                                                newelement.automatons = autostate['next_state']
+                                            if can_go_next(autostate, newelement.coverage) and autostate.next_state != -1:
+                                                newelement.automatons = autostate.next_state
                                         else:
                                             len_covered = 0
                                         #printf('testing 1: %s\n', element.translation)
