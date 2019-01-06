@@ -134,6 +134,17 @@ cdef struct candidate:
     float loss, prob_align 
 
 
+cdef struct phrase_pair:
+    char *phrase
+    float prob
+
+
+cdef phrase_pair* build_phrases_c(phrases):
+    cdef phrase_pair* result = <phrase_pair*> malloc(500*sizeof(phrase_pair))
+     
+    return result
+
+
 cdef candidate copy_candidate(candidate cand):
     cdef candidate result
     #result.phrase = <char*> malloc(strlen(cand.phrase)*sizeof(char))
@@ -451,7 +462,7 @@ def transform_gold(phrase):
     return ' '.join(words)
 
 
-def subset(phrases, words, ngram, params, cov=None, rbpe=False, stopword_list=None, goldphrase=None):
+cdef subset(phrases, words, ngram, params, rbpe=False, stopword_list=None, goldphrase=None):
     result = {}
     words_result = copy.deepcopy(words)
     covered = [0] * len(words)
@@ -481,15 +492,15 @@ def subset(phrases, words, ngram, params, cov=None, rbpe=False, stopword_list=No
     for i in range(len(words)):
         if golden[i] == 1:
             continue
-        if cov:
-            if cov[i] != 0:
-                continue
+        #if cov:
+        #    if cov[i] != 0:
+        #        continue
         for j in range(i+1, min(i+ngram+1, len(words)+1)):
             if golden[j-1] == 1:
                 break
-            if cov:
-                if cov[j-1] != 0:
-                    break
+            #if cov:
+            #    if cov[j-1] != 0:
+            #        break
             phrase = ' '.join(words[i:j])
             if phrases.has_key(phrase):
                 if params.allow_src2stop:
@@ -500,9 +511,9 @@ def subset(phrases, words, ngram, params, cov=None, rbpe=False, stopword_list=No
                     covered[k] = 1
     # special treatment for words with no phrase
     for i in range(len(words)):
-        if cov:
-            if cov[i] != 0:
-                continue
+        #if cov:
+        #    if cov[i] != 0:
+        #        continue
         if golden[i] == 1:
             continue
         '''
@@ -878,30 +889,11 @@ cdef int add_stack(translation_status *stack, int stack_count, translation_statu
         return stack_count 
 
 
-cdef int compare_candidate(candidate a, candidate b):
-    if a.loss > b.loss:
-        return 1
-    elif a.loss == b.loss:
-        if a.prob_align > b.prob_align:
-            return 1
-        elif a.prob_align == b.prob_align:
-            return 0
-        else:
-            return -1
-    else:
-        return -1
-
-
 def list_of_empty_list(num):
     result = []
     for i in range(num):
         result.append([])
     return result
-
-
-cdef int add_candidate_limit(candidate *candidate_list_limit, int count, candidate new, params):
-    candidate_list_limit[count] = copy_candidate(new)
-    return count+1 
 
 
 cdef char* get_first_word_and_length(char *inp, int *have_first):
@@ -946,37 +938,77 @@ cdef char* get_first_word(char *inp):
         return result
 
 
+cdef int compare_candidate(candidate a, candidate b):
+    if a.loss > b.loss:
+        return 1
+    elif a.loss == b.loss:
+        if strcmp(get_first_word(a.phrase), get_first_word(b.phrase)) == 0:
+            if a.prob_align > b.prob_align:
+                return 2
+            elif a.prob_align == b.prob_align:
+                return 100
+            else:
+                return -2
+        if a.prob_align > b.prob_align:
+            return 1
+        elif a.prob_align == b.prob_align:
+            return 0
+        else:
+            return -1
+    else:
+        return -1
+
+
+cdef int add_candidate_limit(candidate *candidate_list_limit, int count, candidate new, params):
+    candidate_list_limit[count] = new
+    return count+1 
+
+
 cdef int add_candidate(candidate *candidate_list, int count, candidate new, params):
-    cdef int i, pos
+    cdef int i, pos, comp
     cdef int have_same = 0
+    '''
     for i in range(count):
         if strcmp(get_first_word(candidate_list[i].phrase), get_first_word(new.phrase)) == 0:
             if new.prob_align > candidate_list[i].prob_align:
-                candidate_list[i] = copy_candidate(new)
+                candidate_list[i] = new
                 return count
             else:
                 return count
+    '''
     if count < params.beam_size:
-        pos = 0 
-        while pos < count:
-            if compare_candidate(new, candidate_list[pos]) == 1:
+        pos = count 
+        while pos >= 1:
+            comp = compare_candidate(candidate_list[pos-1], new)
+            if comp == 1:
                 break
-            pos += 1
+            if comp == -2:
+                candidate_list[pos-1] = new
+                return count
+            elif comp == 2 or comp == 100:
+                return count
+            pos -= 1
         if pos < count:
             for i in range(count, pos, -1):
                 candidate_list[i] = candidate_list[i-1]
-        candidate_list[pos] = copy_candidate(new)
+        candidate_list[pos] = new
         return count+1
     else:
-        pos = 0
-        while pos < params.beam_size:
-            if compare_candidate(new, candidate_list[pos]) == 1:
+        pos = params.beam_size
+        while pos >=1:
+            comp = compare_candidate(candidate_list[pos-1], new)
+            if comp == 1:
                 break
-            pos += 1
+            if comp == -2:
+                candidate_list[pos-1] = new
+                return count
+            elif comp == 2 or comp == 100:
+                return count
+            pos -= 1
         if pos < params.beam_size:
             for i in range(params.beam_size-1, pos, -1):
                 candidate_list[i] = candidate_list[i-1]
-            candidate_list[pos] = copy_candidate(new)
+            candidate_list[pos] = new
         return count
 
 
@@ -1086,6 +1118,7 @@ def main(args):
         int max_candidate = 10000
         int i, j, k, len_tmp, pos, pos_end, offset
         char *tmpstring
+        phrase_pair *phrases_c
         automatons newautom
         # encode & prepare
         float time_test[20]
@@ -1242,7 +1275,7 @@ def main(args):
             count_test = [0]*20
             count_test_tag = [0]*20
             ### testing tag
-            time_test_tag = ['src2null_inner', 'src2null_inner_afterprune', 'neural_prepare', 'neural_decoding', 'neural_after', 'limit_inner', 'generate candidate', 'generate from phrase', 'generate from word', 'generate stop word', 'process candidate', 'candidate_normal', 'candidate_normal_afterprune', 'candidate_limit', 'candidate_limit_afterprune', 0,0,'time_testing','before_encode','after encoder before decode']
+            time_test_tag = ['src2null_inner', 'src2null_inner_afterprune', 'neural_prepare', 'neural_decoding', 'neural_after', 'limit_inner', 'generate candidate', 'generate from phrase', 'generate from word', 'generate stop word', 'process candidate', 'candidate_normal', 'candidate_normal_afterprune', 'candidate_limit', 'candidate_limit_afterprune', 'time_eos',0,'time_testing','before_encode','after encoder before decode']
             count_test_tag = ['src2null_inner', 'src2null_inner_afterprune', 'neural_input', 'limit_inner', 'phrase_inner', 'word_inner', 'stopword', 'candidate_normal', 'candidate_normal_afterprune', 'candidate_limit', 'candidate_limit_afterprune', 0,0,0,0,0,0,'count_testing',0,0]
             ###
             count += 1
@@ -1269,6 +1302,7 @@ def main(args):
 
             # generate a subset of phrase table for current translation
             phrases, golden, words_result = subset(phrase_table, words, args.ngram, params, rbpe=args.rbpe, stopword_list=stoplist, goldphrase=goldphrase)
+            phrases_c = build_phrases_c(phrases)
             words = words_result
             phrases_reverse = reverse_phrase(phrases)
             #print('reverse phrase:', phrases_reverse)
@@ -1601,23 +1635,23 @@ def main(args):
                                                         #printf('start phrase\n')
                                                         count_test[4] += 1
                                                         phrase, prob_align = phrases[bpe_phrase][j]
-                                                        words_p = phrase.split(' ')
-                                                        new_loss = log_probs[i][getid_word(ivocab_trg, words_p[0])]
                                                         len_tmp = len(phrase)
                                                         tmpstr2 = phrase
+                                                        firstword = get_first_word_and_length(tmpstr2, &have_first)
+                                                        new_loss = log_probs[i][getid_word(ivocab_trg, firstword)]
                                                         #printf('phrase 1.0: %s ; %d %d\n', tmpstr2, strlen(tmpstr2), len_tmp)
-                                                        newbuffer = <char*> malloc(len_tmp+1) 
-                                                        strcpy(newbuffer, tmpstr2)
+                                                        #newbuffer = <char*> malloc(len_tmp+1) 
+                                                        #strcpy(newbuffer, tmpstr2)
                                                         #printf('phrase 1.1: %s ; %d %d\n', newbuffer, strlen(newbuffer), len_tmp)
-                                                        newbuffer[len_tmp] = 0
-                                                        new_candidate.phrase = newbuffer 
+                                                        #newbuffer[len_tmp] = 0
+                                                        new_candidate.phrase = tmpstr2 
                                                         new_candidate.pos = pos
                                                         new_candidate.pos_end = pos_end
                                                         new_candidate.loss = new_loss
                                                         new_candidate.prob_align = prob_align
                                                         #new_candidate = [phrase, pos, pos_end, new_loss, prob_align]
                                                         #printf('add candi from phrase: %s %d\n', new_candidate.phrase, pos)
-                                                        if params_c.split_limited and len(words_p) > 1:
+                                                        if params_c.split_limited and have_first != -1:
                                                             candidate_phrase_list_limit_count[len_bpe_phrase]= add_candidate_limit(candidate_phrase_list_limit[len_bpe_phrase], candidate_phrase_list_limit_count[len_bpe_phrase], new_candidate, params)
                                                             #printf('limit count: %d\n', candidate_phrase_list_limit_count[len_bpe_phrase])
                                                         else:
@@ -1633,32 +1667,24 @@ def main(args):
                                         num_total = len(phrases[words[pos]])
                                         for j in range(num_total):
                                             #printf('start word\n')
-                                            count_test[5] += 1
-                                            ### 0.2s/181w
-                                            tmp = phrases[words[pos]][j] # 0.1s/181w
-                                            phrase, prob_align = tmp 
-                                            ###
+                                            #count_test[5] += 1
+                                            ### 1s/181w
+                                            #time_ts = time.time()
+                                            phrase, prob_align = phrases[words[pos]][j] 
                                             len_tmp = len(phrase)
                                             tmpstr2 = phrase
-                                            #printf('testing: %s\n', tmpstr2)
-                                            firstword = get_first_word_and_length(tmpstr2, &have_first)
-                                            #printf('testing 2: %s\n', firstword)
+                                            #time_te = time.time() # 0.15s/181w overhead
+                                            #time_test[17] += time_te-time_ts 
+                                            firstword = get_first_word_and_length(tmpstr2, &have_first) #0.25s/181w
 
-                                            #words_p = phrase.split(' ') # 0.9s/181w
-                                            time_ts = time.time()
-                                            ### 1.25s/181w
-                                            tmp_id = getid_word(ivocab_trg, firstword) # 0.85/181w
-                                            #tmp_id = getid_word(ivocab_trg, words_p[0])
-                                            time_te = time.time() # 0.15s/181w overhead
-                                            time_test[17] += time_te-time_ts 
+                                            tmp_id = getid_word(ivocab_trg, firstword) # 0.35/181w
                                             new_loss = log_probs[i][tmp_id] 
                                             ###
-                                            #printf('word 1.0: %s ; %d %d\n', tmpstr2, strlen(tmpstr2), len_tmp)
-                                            newbuffer = <char*> malloc((len_tmp+1)*sizeof(char)) 
-                                            strcpy(newbuffer, tmpstr2)
-                                            newbuffer[len_tmp] = 0
+                                            #newbuffer = <char*> malloc((len_tmp+1)*sizeof(char)) 
+                                            #strcpy(newbuffer, tmpstr2)
+                                            #newbuffer[len_tmp] = 0
                                             #printf('word 1.1: %s ; %d %d\n', newbuffer, strlen(newbuffer), len_tmp)
-                                            new_candidate.phrase = newbuffer 
+                                            new_candidate.phrase = tmpstr2 
                                             new_candidate.pos = pos
                                             new_candidate.pos_end = pos
                                             new_candidate.loss = new_loss
@@ -1683,10 +1709,10 @@ def main(args):
                                     #tmpstr2 = phrase
                                     tmpstr2 = stopword
                                     len_tmp = len(stopword)
-                                    newbuffer = <char*> malloc((len_tmp+1)*sizeof(char)) 
-                                    strcpy(newbuffer, tmpstr2)
-                                    newbuffer[len_tmp] = 0
-                                    new_candidate.phrase = newbuffer 
+                                    #newbuffer = <char*> malloc((len_tmp+1)*sizeof(char)) 
+                                    #strcpy(newbuffer, tmpstr2)
+                                    #newbuffer[len_tmp] = 0
+                                    new_candidate.phrase = tmpstr2 
                                     new_candidate.pos = -1
                                     new_candidate.pos_end = -1
                                     new_candidate.loss = new_loss
@@ -1899,6 +1925,7 @@ def main(args):
                                 time_candidate_end = time.time()
                                 time_test[10] += time_candidate_end-time_candidate_start
 
+
                                 if all_covered:
                                     new_loss = float(element.loss+log_probs[i][getid_word(ivocab_trg, '<eos>')])
                                     newelement = copy_translation_status(element, len_src)
@@ -1912,6 +1939,8 @@ def main(args):
                                     newelement.loss /= length_penalty
                                     #print('to_finish:', new[0].encode('utf-8'), new[-1])
                                     finished_count = add_stack(finished, finished_count, newelement, len_src, params_c.beam_size)
+                                time_eos_end = time.time()
+                                time_test[15] += time_eos_end-time_candidate_end
 
                 time_generate_end = time.time()
                 time_generate += time_generate_end-time_generate_start
