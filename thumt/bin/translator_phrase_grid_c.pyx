@@ -361,15 +361,37 @@ def read_files(names):
 cdef get_feature_map(translation_status stack[100][4], int *stack_count, translation_status *stack_limit[100], int *stack_limit_count, int len_src, ivocab_trg, hidden_state_pool, params, int maps[100][4], int maps_limit[100][10000]):
     #printf('get_feature_map\n')
     features = {}
-    sentence_list = []
+    sentence_list = {}
+    cdef int sentence_num = 0
     new_hidden_pool = []
-    cdef int num_cov, pos, idx, i
+    cdef int num_cov, pos, idx, i, max_len
+    cdef int count = 0
     cdef translation_status element
     for num_cov in range(len_src+1):
         #maps.append([])
         for idx in range(stack_count[num_cov]):
+            count += 1
             element = stack[num_cov][idx]
             found = 0
+            if sentence_list.has_key(element.translation):
+                maps[num_cov][idx] = sentence_list[element.translation]
+            else:
+                sentence_list[element.translation] = sentence_num
+                maps[num_cov][idx] = sentence_num
+                sentence_num += 1
+                new_hidden_pool.append(hidden_state_pool[element.hidden_state_id])
+        for idx in range(stack_limit_count[num_cov]):
+            count += 1
+            element = stack_limit[num_cov][idx]
+            found = 0
+            if sentence_list.has_key(element.translation):
+                maps_limit[num_cov][idx] = sentence_list[element.translation]
+            else:
+                sentence_list[element.translation] = sentence_num
+                maps_limit[num_cov][idx] = sentence_num
+                sentence_num += 1
+                new_hidden_pool.append(hidden_state_pool[element.hidden_state_id])
+            '''
             for i in range(len(sentence_list)):
                 if element.translation == sentence_list[i]:
                     found = 1
@@ -381,7 +403,9 @@ cdef get_feature_map(translation_status stack[100][4], int *stack_count, transla
                 sentence_list.append(element.translation)
                 maps[num_cov][idx] = len(sentence_list)-1
                 new_hidden_pool.append(hidden_state_pool[element.hidden_state_id])
+            '''
     #printf('get_feature_map 0.5')
+    '''
     for num_cov in range(len_src+1):
         #printf('get_feature_map 0.6: %d/%d\n', num_cov, stack_limit_count[num_cov])
         #maps_limit.append([])
@@ -400,17 +424,23 @@ cdef get_feature_map(translation_status stack[100][4], int *stack_count, transla
                 sentence_list.append(element.translation)
                 maps_limit[num_cov][idx] = len(sentence_list)-1
                 new_hidden_pool.append(hidden_state_pool[element.hidden_state_id])
+    '''
+    sen_ids_list = [0] * sentence_num
+    for sen in sentence_list.keys():
+        assert sen_ids_list[sentence_list[sen]] == 0
+        sen_ids_list[sentence_list[sen]] = getid(ivocab_trg, sen)
 
-    sen_ids_list = [getid(ivocab_trg, sentence) for sentence in sentence_list]
-    num_sent = len(sen_ids_list)
+    #sen_ids_list = [getid(ivocab_trg, sentence) for sentence in sentence_list]
+    #num_sent = len(sen_ids_list)
     max_len = max(map(len, sen_ids_list))
-    padded_input = np.ones([num_sent, max_len], dtype=np.int32) * ivocab_trg['<pad>']
-    for i in range(num_sent):
+    padded_input = np.ones([sentence_num, max_len], dtype=np.int32) * ivocab_trg['<pad>']
+    for i in range(sentence_num):
         padded_input[i][:len(sen_ids_list[i])] = sen_ids_list[i]
     features["target"] = padded_input
     features["target_length"] = [len(sen_ids) for sen_ids in sen_ids_list]
     features["decoder"] = {}
     for i in range(params.num_decoder_layers):
+        # the main timecost is here
         features["decoder"]["layer_%d" % i] = merge_tensor(new_hidden_pool, i)
     #print('maps:', maps)
     #print('maps_limit:', maps_limit)
@@ -1162,6 +1192,7 @@ def main(args):
         candidate new_candidate
         int candidate_phrase_list_count[100]
         int candidate_phrase_list_limit_count[100]
+        float length_penalty
     ###
 
     # Build Graph
@@ -1449,7 +1480,10 @@ def main(args):
                 time_neural_start = time.time()
                 neural_result = [0]*(len_src+1)
                 neural_result_limit = [0]*(len_src+1)
+                time_ts = time.time()
                 features, num_x = get_feature_map(stacks[length], stacks_count[length], stacks_limit[length], stacks_limit_count[length], len_src, ivocab_trg, hidden_state_pool, params, maps, maps_limit)
+                time_te = time.time()
+                time_test[17] += time_te-time_ts
                 count_test[2] += num_x
                 features["encoder"] = np.tile(encoder_state["encoder"], (num_x, 1, 1))
                 features["source"] = [getid(ivocab_src, input)] * num_x 
