@@ -1572,7 +1572,8 @@ def main(args):
                                     tmpstr2[pos] = 0
                                 else:
                                     tmpstr2 = element.limits
-                                new_loss = float(element.loss+log_probs_limit[i][getid_word(ivocab_trg, tmpstr2)])
+                                new_loss = log_probs_limit[i][getid_word(ivocab_trg, tmpstr2)]
+                                new_loss += element.loss
 
                                 if still_limited == 1:
                                     #printf('still_limited\n')
@@ -1681,7 +1682,8 @@ def main(args):
                                                         phrase, prob_align = phrases[bpe_phrase][j]
                                                         tmpstr2 = phrase
                                                         firstword = get_first_word_and_length(tmpstr2, &have_first)
-                                                        new_loss = log_probs[i][getid_word(ivocab_trg, firstword)]
+                                                        tmp_id = getid_word(ivocab_trg, firstword)
+                                                        new_loss = log_probs[i][tmp_id]
                                                         new_candidate.phrase = tmpstr2 
                                                         new_candidate.pos = pos
                                                         new_candidate.pos_end = pos_end
@@ -1727,7 +1729,8 @@ def main(args):
                                     stopword = null2trg_vocab[j]
                                     count_test[6] += 1
                                     tmpstr2 = stopword
-                                    new_loss = log_probs[i][getid_word(ivocab_trg, tmpstr2)]
+                                    tmp_id = getid_word(ivocab_trg, tmpstr2)
+                                    new_loss = log_probs[i][tmp_id]
                                     new_candidate.phrase = tmpstr2 
                                     new_candidate.pos = -1
                                     new_candidate.pos_end = -1
@@ -1824,7 +1827,7 @@ def main(args):
                                         if new_loss < loss_threshold:
                                             continue
                                         count_test[10] += 1
-                                        time_14s = time.time()
+                                        #time_14s = time.time()
                                         newelement = copy_translation_status(element, len_src)
                                         if pos >= 0:
                                             len_covered = pos_end-pos+1
@@ -1834,7 +1837,7 @@ def main(args):
                                                 newelement.automatons = autostate.next_state
                                         else:
                                             len_covered = 0
-                                        assert len_covered == j
+                                        #assert len_covered == j
                                         newelement.limited = 1
                                         tmpstr2 = cand.phrase+have_first+1
                                         newbuffer = <char*> malloc(strlen(tmpstr2)+1)
@@ -1867,7 +1870,8 @@ def main(args):
 
 
                                 if all_covered:
-                                    new_loss = float(element.loss+log_probs[i][getid_word(ivocab_trg, '<eos>')])
+                                    new_loss = log_probs[i][getid_word(ivocab_trg, '<eos>')]
+                                    new_loss += element.loss
                                     newelement = copy_translation_status(element, len_src)
                                     newbuffer = <char*> malloc(7+strlen(newelement.translation))
                                     strcpy(newbuffer, newelement.translation)
