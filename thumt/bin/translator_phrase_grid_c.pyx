@@ -99,6 +99,7 @@ cdef struct translation_status:
     char *translation
     int *coverage
     float align_loss
+    float src2null_loss
     int automatons
     int limited
     char *limits
@@ -599,6 +600,7 @@ cdef print_stack(translation_status *stack, int len_src, int count):
             printf('%d ',stack[i].coverage[j])
         printf(']\n')
         printf('align_loss: %f\n', stack[i].align_loss)
+        printf('src2null_loss: %f\n', stack[i].src2null_loss)
         printf('previous: [%d %d %d]\n', stack[i].previous[0], stack[i].previous[1], stack[i].previous[2])
         printf('loss: %f\n\n', stack[i].loss)
 
@@ -1180,7 +1182,7 @@ def main(args):
         int num_x
         # generation
         int len_covered, nosense, is_visible, num_total, tmp_id, have_first, total_length, len_first
-        float prob_align
+        float prob_align, total_src2null_loss
         beam add_result
         char *tmpstr2
         char *newbuffer
@@ -1385,6 +1387,7 @@ def main(args):
             element_init.translation = ''
             element_init.coverage = coverage
             element_init.align_loss = 0
+            element_init.src2null_loss = 0
             element_init.automatons = 0
             element_init.limited = 0
             element_init.limits = ''
@@ -1444,8 +1447,10 @@ def main(args):
                             
                             assert element.coverage[nullpos] == 0
                             if params_c.src2null_loss:
+                                total_src2null_loss = element.src2null_loss+my_log(probs_null[nullpos])
+                                if total_src2null_loss < -1*length:
+                                    continue
                                 new_loss = element.loss+my_log(probs_null[nullpos])
-                                #total_src2null_loss = element[3][3]+my_log(probs_null[nullpos])
                             else:
                                 new_loss = element.loss
                                 #total_src2null_loss = 0
@@ -1462,6 +1467,7 @@ def main(args):
 
                             newelement.previous = [length, num_cov, i]
                             newelement.loss = new_loss
+                            newelement.src2null_loss = total_src2null_loss
                             #printf('%d/%d add to %d/%d\n', length, num_cov, length, num_cov+1)
                             stacks_count[length][num_cov+1] = add_stack(stacks[length][num_cov+1], stacks_count[length][num_cov+1], newelement, len_src, params_c.beam_size, params.merge_status, params_c.keep_status_num)
                             time_1e = time.time()
