@@ -100,6 +100,7 @@ cdef struct translation_status:
     int *coverage
     float align_loss
     float src2null_loss
+    float translation_loss
     int automatons
     int limited
     char *limits
@@ -144,6 +145,11 @@ cdef phrase_pair* build_phrases_c(phrases):
     cdef phrase_pair* result = <phrase_pair*> malloc(500*sizeof(phrase_pair))
      
     return result
+
+
+cdef struct loss_pair:
+    char *translation
+    float loss
 
 
 cdef candidate copy_candidate(candidate cand):
@@ -601,6 +607,7 @@ cdef print_stack(translation_status *stack, int len_src, int count):
         printf(']\n')
         printf('align_loss: %f\n', stack[i].align_loss)
         printf('src2null_loss: %f\n', stack[i].src2null_loss)
+        printf('translation_loss: %f\n', stack[i].translation_loss)
         printf('previous: [%d %d %d]\n', stack[i].previous[0], stack[i].previous[1], stack[i].previous[2])
         printf('loss: %f\n\n', stack[i].loss)
 
@@ -1174,7 +1181,7 @@ def main(args):
         int all_empty
         translation_status element
         translation_status newelement
-        float new_loss
+        float new_loss, new_word_loss
         float new_align_loss
         # neural
         int maps[100][4]
@@ -1388,6 +1395,7 @@ def main(args):
             element_init.coverage = coverage
             element_init.align_loss = 0
             element_init.src2null_loss = 0
+            element_init.translation_loss = 0
             element_init.automatons = 0
             element_init.limited = 0
             element_init.limits = ''
@@ -1572,8 +1580,8 @@ def main(args):
                                     tmpstr2[pos] = 0
                                 else:
                                     tmpstr2 = element.limits
-                                new_loss = log_probs_limit[i][getid_word(ivocab_trg, tmpstr2)]
-                                new_loss += element.loss
+                                new_word_loss = log_probs_limit[i][getid_word(ivocab_trg, tmpstr2)]
+                                new_loss = new_word_loss+element.loss
 
                                 if still_limited == 1:
                                     #printf('still_limited\n')
@@ -1594,10 +1602,9 @@ def main(args):
                                     strcpy(newbuffer, element.limits+offset)
                                     newelement.limits = newbuffer 
                                     newelement.hidden_state_id = new_state_limit_id[i]
+                                    newelement.translation_loss += new_word_loss
                                     newelement.loss = new_loss
                                     # warning: only works when keep_status_num == 1
-                                    #new = [(element[0]+' '+limits[0]).strip(), newstatus, new_state_limit[i], element[3], new_loss]
-                                    #printf('point 2: %d ; %d ; %s ; %s\n', pos, strlen(tmpstr2), tmpstr2, newelement.limits)
                                     stacks_limit_count[length+1][num_cov] = add_stack_limited(stacks_limit[length+1][num_cov], stacks_limit_count[length+1][num_cov], newelement, len_src, params)
                                 else:
                                     #printf('not still_limited\n')
@@ -1618,6 +1625,7 @@ def main(args):
                                     newelement.limited = 0
                                     newelement.limits = ""
                                     newelement.hidden_state_id = new_state_limit_id[i]
+                                    newelement.translation_loss += new_word_loss
                                     newelement.loss = new_loss
                                     #printf('%d/%d add to %d/%d\n', length, num_cov, length+1, num_cov)
                                     stacks_count[length+1][num_cov] = add_stack(stacks[length+1][num_cov], stacks_count[length+1][num_cov], newelement, len_src, params_c.beam_size, params.merge_status, params_c.keep_status_num)
@@ -1798,6 +1806,7 @@ def main(args):
                                         newelement.previous[0] = length
                                         newelement.previous[1] = num_cov
                                         newelement.previous[2] = i
+                                        newelement.translation_loss += loss
                                         newelement.loss = new_loss
                                         newelement.hidden_state_id = new_state_id[i]
                                         stacks_count[length+1][num_cov+len_covered] = add_stack(stacks[length+1][num_cov+len_covered], stacks_count[length+1][num_cov+len_covered], newelement, len_src, params_c.beam_size, params.merge_status, params_c.keep_status_num)
@@ -1845,6 +1854,7 @@ def main(args):
                                         newbuffer[strlen(tmpstr2)] = 0
                                         newelement.limits = newbuffer
                                         newelement.align_loss += log(prob_align)
+                                        newelement.translation_loss += loss
                                         newelement.loss = new_loss
                                         newelement.previous[0] = length
                                         newelement.previous[1] = num_cov
