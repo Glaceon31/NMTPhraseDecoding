@@ -1146,7 +1146,7 @@ def main(args):
         int maps_limit[100][10000]
         int num_x
         # generation
-        int len_covered, nosense, is_visible, num_total, tmp_id, have_first
+        int len_covered, nosense, is_visible, num_total, tmp_id, have_first, total_length
         float prob_align
         beam add_result
         char *tmpstr2
@@ -1704,13 +1704,14 @@ def main(args):
 
                                 # generate from null2trg
                                 time_stop_start = time.time()
-                                for stopword in null2trg_vocab:
+                                for j in range(len(null2trg_vocab)):
+                                    stopword = null2trg_vocab[j]
                                     #printf('start null\n')
                                     count_test[6] += 1
-                                    new_loss = log_probs[i][getid_word(ivocab_trg, stopword)]
-                                    #tmpstr2 = phrase
                                     tmpstr2 = stopword
                                     len_tmp = len(stopword)
+                                    new_loss = log_probs[i][getid_word(ivocab_trg, tmpstr2)]
+                                    #tmpstr2 = phrase
                                     #newbuffer = <char*> malloc((len_tmp+1)*sizeof(char)) 
                                     #strcpy(newbuffer, tmpstr2)
                                     #newbuffer[len_tmp] = 0
@@ -1739,16 +1740,8 @@ def main(args):
                                     #printf("normal\n")
                                     if num_cov+j > len_src:
                                         continue
-                                    #if num_cov == 0 and j == 0:
-                                    #    printf('testing', candidate_phrase_list[j])
                                     for k in range(candidate_phrase_list_count[j]):
                                         cand = candidate_phrase_list[j][k]
-                                        #print_cand(cand)
-                                        '''
-                                        if num_cov == 0 and j == 0 and stacks_count[1][0] > 0:
-                                            printf('first1 %s\n', stacks[1][0][0].translation)
-                                            printf('%d\n', stacks[1][0][0].translation)
-                                        '''
                                         count_test[7] += 1
                                         time_10s = time.time()
                                         phrase = cand.phrase
@@ -1850,28 +1843,22 @@ def main(args):
                                         loss_threshold = 0
                                     # limited
                                     #printf("limited\n")
+                                    time_13s = time.time()
                                     for k in range(candidate_phrase_list_limit_count[j]):
                                         cand = candidate_phrase_list_limit[j][k]
                                         count_test[9] += 1
-                                        time_13s = time.time()
-                                        #phrase, pos, pos_end, loss, prob_align = cand
-                                        phrase = cand.phrase
                                         pos = cand.pos
                                         pos_end = cand.pos_end
                                         loss = cand.loss
                                         prob_align = cand.prob_align
                                         last_pos = [length, num_cov, i]
-                                        words_p = phrase.split(' ')
+                                        firstword = get_first_word_and_length(cand.phrase, &have_first)
                                         new_loss = float(element.loss+loss)
                                         # safe prune for search
                                         if finished_count >= params_c.beam_size and new_loss/get_lp(len_src+params.decode_length, params.decode_alpha) < finished[finished_count-1].loss:
-                                            time_13e = time.time()
-                                            time_test[13] += time_13e-time_13s
                                             continue
                                         # not safe prune
                                         if new_loss < loss_threshold:
-                                            time_13e = time.time()
-                                            time_test[13] += time_13e-time_13s
                                             continue
                                         count_test[10] += 1
                                         time_14s = time.time()
@@ -1886,8 +1873,7 @@ def main(args):
                                             len_covered = 0
                                         assert len_covered == j
                                         newelement.limited = 1
-                                        tmpstr = ' '.join(words_p[1:])
-                                        tmpstr2 = tmpstr
+                                        tmpstr2 = cand.phrase+have_first+1
                                         newbuffer = <char*> malloc(strlen(tmpstr2)+1)
                                         strcpy(newbuffer, tmpstr2)
                                         newbuffer[strlen(tmpstr2)] = 0
@@ -1896,23 +1882,23 @@ def main(args):
                                         newelement.loss = new_loss
                                         newelement.previous = last_pos
 
-                                        if strcmp(newelement.translation, '') != 0:
-                                            words_p[0] = ' '+words_p[0]
-                                        len_tmp = len(words_p[0])
-                                        tmpstr2 = words_p[0]
-                                        newbuffer = <char*> malloc(len_tmp+2+strlen(newelement.translation))
+                                        newbuffer = <char*> malloc(have_first+4+strlen(newelement.translation))
                                         strcpy(newbuffer, newelement.translation)
-                                        strcat(newbuffer, tmpstr2)
-                                        newbuffer[len_tmp+strlen(newelement.translation)] = 0
+                                        total_length = strlen(newelement.translation)
+                                        if strcmp(newelement.translation, '') != 0:
+                                            newbuffer[strlen(newelement.translation)] = ' '
+                                            total_length += 1
+                                        strcpy(newbuffer+total_length, firstword)
+                                        total_length += have_first
+                                        newbuffer[total_length] = 0
                                         newelement.translation = newbuffer 
-                                        #tmpstr = (element.translation+' '+words_p[0]).strip()
-                                        #newelement.translation = tmpstr
                                         newelement.hidden_state_id = new_state_id[i]
-                                        # Causing segmentation fault
                                         stacks_limit_count[length+1][num_cov+len_covered] = add_stack_limited(stacks_limit[length+1][num_cov+len_covered], stacks_limit_count[length+1][num_cov+len_covered], newelement, len_src, params)
-                                        time_14e = time.time()
-                                        time_test[13] += time_14e-time_13s
-                                        time_test[14] += time_14e-time_14s
+                                        #time_14e = time.time()
+                                        #time_test[13] += time_14e-time_13s
+                                        #time_test[14] += time_14e-time_14s
+                                    time_13e = time.time()
+                                    time_test[13] += time_13e-time_13s
 
                                 time_candidate_end = time.time()
                                 time_test[10] += time_candidate_end-time_candidate_start
