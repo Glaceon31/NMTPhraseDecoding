@@ -524,6 +524,8 @@ cdef subset(phrases, words, ngram, params, rbpe=False, stopword_list=None, goldp
             result[words[i]] = [[words[i], 1.0]]
         '''
         if result.has_key(words[i]):
+            if words[i] == ',':
+                result[words[i]].append([',', 1.0])
             if not ['<oov>', 1.0] in result[words[i]]:
                 result[words[i]].append(['<oov>', 1.0])
         else:
@@ -821,6 +823,7 @@ cdef int add_stack_limited(translation_status *stack_limit, int stack_limit_coun
 cdef int add_stack(translation_status *stack, int stack_count, translation_status element, int len_src, int beam_size, merge_status=None, max_status=1, verbose=0):
     cdef int i, j 
     cdef translation_status tmp
+    '''
     if strcmp(element.translation, 'after the peace summit between leaders of south and north korea in 2000 ,') == 0:
         printf('testing: %f; %f\n', element.loss, element.align_loss)
     if verbose == 1:
@@ -828,10 +831,9 @@ cdef int add_stack(translation_status *stack, int stack_count, translation_statu
         printf('stack count %d/%d\n', stack_count, beam_size)
         if stack_count > 0:
             printf('add stack first: %s\n', stack[0].translation)
+    '''
     if merge_status:
         for i in range(stack_count):
-            #printf("add stack finding same %d\n", i)
-            #printf("comparing %s ;and; %s\n", element.translation, stack[i].translation)
             #if element.translation == stack[i].translation: 
             if strcmp(element.translation, stack[i].translation) == 0: 
                 #printf("add stack found same %d\n", i)
@@ -1602,7 +1604,7 @@ def main(args):
                                 time_cs = time.time()
                                 for j in range(len_src+1):
                                     free(candidate_phrase_list_limit[j])
-                                    candidate_phrase_list[j] = <candidate*> malloc(max_candidate*sizeof(candidate))
+                                    #candidate_phrase_list[j] = <candidate*> malloc(max_candidate*sizeof(candidate))
                                     candidate_phrase_list_limit[j] = <candidate*> malloc(max_candidate*sizeof(candidate))
                                     candidate_phrase_list_count[j] = 0
                                     candidate_phrase_list_limit_count[j] = 0
@@ -1667,7 +1669,7 @@ def main(args):
                                         num_total = len(phrases[words[pos]])
                                         for j in range(num_total):
                                             #printf('start word\n')
-                                            #count_test[5] += 1
+                                            count_test[5] += 1
                                             ### 1s/181w
                                             #time_ts = time.time()
                                             phrase, prob_align = phrases[words[pos]][j] 
@@ -1768,7 +1770,6 @@ def main(args):
                                             break
                                         count_test[8] += 1
                                         time_11s = time.time()
-                                        #printf('testing 0: %s\n', element.translation)
                                         newelement = copy_translation_status(element, len_src)
                                         if pos >= 0:
                                             len_covered = pos_end-pos+1
@@ -1779,12 +1780,10 @@ def main(args):
                                         else:
                                             len_covered = 0
                                         assert len_covered == j
-                                        #printf('testing 0.1\n')
                                         if len(words_p) > 1:
                                             newelement.limited = 1
                                             tmpstr = ' '.join(words_p[1:])
                                             tmpstr2 = tmpstr
-                                            #printf('testing: %s\n', tmpstr2)
                                             newelement.limits = tmpstr2
                                         else:
                                             newelement.limited = 0
@@ -1825,10 +1824,7 @@ def main(args):
                                                 printf('first2 %s\n', stacks[1][0][0].translation)
                                             vb = 1
                                         '''
-                                        #printf('testing 0.2\n')
-                                        #printf('%d/%d add to %d/%d\n', length, num_cov, length+1, num_cov+len_covered)
                                         stacks_count[length+1][num_cov+len_covered] = add_stack(stacks[length+1][num_cov+len_covered], stacks_count[length+1][num_cov+len_covered], newelement, len_src, params_c.beam_size, params.merge_status, params_c.keep_status_num)
-                                        #printf('testing 0.3\n')
                                         '''
                                         if num_cov <= 3 and j == 0:
                                             printf('first3 %s\n', stacks[1][0][0].translation)
@@ -1888,7 +1884,6 @@ def main(args):
                                                 newelement.automatons = autostate.next_state
                                         else:
                                             len_covered = 0
-                                        #printf('testing 1: %s\n', element.translation)
                                         assert len_covered == j
                                         newelement.limited = 1
                                         tmpstr = ' '.join(words_p[1:])
@@ -1896,7 +1891,6 @@ def main(args):
                                         newbuffer = <char*> malloc(strlen(tmpstr2)+1)
                                         strcpy(newbuffer, tmpstr2)
                                         newbuffer[strlen(tmpstr2)] = 0
-                                        #printf("testing 1.1: %s\n", tmpstr2)
                                         newelement.limits = newbuffer
                                         newelement.align_loss += log(prob_align)
                                         newelement.loss = new_loss
@@ -1914,10 +1908,8 @@ def main(args):
                                         #tmpstr = (element.translation+' '+words_p[0]).strip()
                                         #newelement.translation = tmpstr
                                         newelement.hidden_state_id = new_state_id[i]
-                                        #printf('testing 1.2: %d\n', stacks_limit_count[length+1][num_cov+len_covered])
                                         # Causing segmentation fault
                                         stacks_limit_count[length+1][num_cov+len_covered] = add_stack_limited(stacks_limit[length+1][num_cov+len_covered], stacks_limit_count[length+1][num_cov+len_covered], newelement, len_src, params)
-                                        #printf('testing 1.3\n')
                                         time_14e = time.time()
                                         time_test[13] += time_14e-time_13s
                                         time_test[14] += time_14e-time_14s
