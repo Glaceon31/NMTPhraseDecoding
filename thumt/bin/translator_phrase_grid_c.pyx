@@ -1677,25 +1677,16 @@ def main(args):
                                                     # start translation
                                                     for j in range(len(phrases[bpe_phrase])):
                                                         # warning: need to build seperate candidate list for different number of covered words 
-                                                        #printf('start phrase\n')
                                                         count_test[4] += 1
                                                         phrase, prob_align = phrases[bpe_phrase][j]
-                                                        #len_tmp = len(phrase)
                                                         tmpstr2 = phrase
                                                         firstword = get_first_word_and_length(tmpstr2, &have_first)
                                                         new_loss = log_probs[i][getid_word(ivocab_trg, firstword)]
-                                                        #printf('phrase 1.0: %s ; %d %d\n', tmpstr2, strlen(tmpstr2), len_tmp)
-                                                        #newbuffer = <char*> malloc(len_tmp+1) 
-                                                        #strcpy(newbuffer, tmpstr2)
-                                                        #printf('phrase 1.1: %s ; %d %d\n', newbuffer, strlen(newbuffer), len_tmp)
-                                                        #newbuffer[len_tmp] = 0
                                                         new_candidate.phrase = tmpstr2 
                                                         new_candidate.pos = pos
                                                         new_candidate.pos_end = pos_end
                                                         new_candidate.loss = new_loss
                                                         new_candidate.prob_align = prob_align
-                                                        #new_candidate = [phrase, pos, pos_end, new_loss, prob_align]
-                                                        #printf('add candi from phrase: %s %d\n', new_candidate.phrase, pos)
                                                         if params_c.split_limited and have_first != -1:
                                                             candidate_phrase_list_limit_count[len_bpe_phrase]= add_candidate_limit(candidate_phrase_list_limit[len_bpe_phrase], candidate_phrase_list_limit_count[len_bpe_phrase], new_candidate, params)
                                                             #printf('limit count: %d\n', candidate_phrase_list_limit_count[len_bpe_phrase])
@@ -1711,37 +1702,22 @@ def main(args):
                                             continue
                                         num_total = len(phrases[words[pos]])
                                         for j in range(num_total):
-                                            #printf('start word\n')
                                             count_test[5] += 1
-                                            ### 1s/181w
-                                            #time_ts = time.time()
                                             phrase, prob_align = phrases[words[pos]][j] 
-                                            #len_tmp = len(phrase)
                                             tmpstr2 = phrase
-                                            #time_te = time.time() # 0.15s/181w overhead
-                                            #time_test[17] += time_te-time_ts 
                                             firstword = get_first_word_and_length(tmpstr2, &have_first) #0.25s/181w
 
                                             tmp_id = getid_word(ivocab_trg, firstword) # 0.35/181w
                                             new_loss = log_probs[i][tmp_id] 
-                                            ###
-                                            #newbuffer = <char*> malloc((len_tmp+1)*sizeof(char)) 
-                                            #strcpy(newbuffer, tmpstr2)
-                                            #newbuffer[len_tmp] = 0
-                                            #printf('word 1.1: %s ; %d %d\n', newbuffer, strlen(newbuffer), len_tmp)
                                             new_candidate.phrase = tmpstr2 
                                             new_candidate.pos = pos
                                             new_candidate.pos_end = pos
                                             new_candidate.loss = new_loss
                                             new_candidate.prob_align = prob_align
-                                            #printf('add candi from word: %s %d\n', new_candidate.phrase, pos)
-                                            #new_candidate = [phrase, pos, pos, new_loss, prob_align]
                                             if params_c.split_limited and have_first != -1:
                                                 candidate_phrase_list_limit_count[1] = add_candidate_limit(candidate_phrase_list_limit[1], candidate_phrase_list_limit_count[1], new_candidate, params)
-                                                #printf('limit count %d\n', candidate_phrase_list_limit_count[1])
                                             else:
                                                 candidate_phrase_list_count[1] = add_candidate(candidate_phrase_list[1], candidate_phrase_list_count[1], new_candidate, params)
-                                            #printf('ADDED\n')
                                     time_word_end = time.time()
                                     time_test[8] += time_word_end-time_phrase_end
 
@@ -1749,24 +1725,15 @@ def main(args):
                                 time_stop_start = time.time()
                                 for j in range(len(null2trg_vocab)):
                                     stopword = null2trg_vocab[j]
-                                    #printf('start null\n')
                                     count_test[6] += 1
                                     tmpstr2 = stopword
-                                    #len_tmp = len(stopword)
                                     new_loss = log_probs[i][getid_word(ivocab_trg, tmpstr2)]
-                                    #tmpstr2 = phrase
-                                    #newbuffer = <char*> malloc((len_tmp+1)*sizeof(char)) 
-                                    #strcpy(newbuffer, tmpstr2)
-                                    #newbuffer[len_tmp] = 0
                                     new_candidate.phrase = tmpstr2 
                                     new_candidate.pos = -1
                                     new_candidate.pos_end = -1
                                     new_candidate.loss = new_loss
                                     new_candidate.prob_align = 1
-                                    #new_candidate = [stopword, -1, -1, new_loss, 1]
-                                    #printf('add candi from null: %s %d\n', new_candidate.phrase, pos)
                                     candidate_phrase_list_count[0] = add_candidate(candidate_phrase_list[0], candidate_phrase_list_count[0], new_candidate, params)
-                                    #printf('ADDED\n')
                                 time_ce = time.time()
                                 time_test[6] += time_ce-time_cs
                                 time_test[9] += time_ce-time_stop_start
@@ -1787,13 +1754,10 @@ def main(args):
                                     for k in range(candidate_phrase_list_count[j]):
                                         cand = candidate_phrase_list[j][k]
                                         count_test[7] += 1
-                                        #phrase = cand.phrase
                                         pos = cand.pos
                                         pos_end = cand.pos_end
                                         loss = cand.loss
                                         prob_align = cand.prob_align
-                                        #last_pos = [length, num_cov, i]
-                                        #words_p = phrase.split(' ')
                                         firstword = get_first_word_and_length(cand.phrase, &have_first)
                                         new_loss = element.loss+loss
                                         # safe prune for search
@@ -1811,18 +1775,8 @@ def main(args):
                                                 newelement.automatons = autostate.next_state
                                         else:
                                             len_covered = 0
-                                        assert len_covered == j
-                                        assert have_first == -1
-                                        '''
-                                        if len(words_p) > 1:
-                                            newelement.limited = 1
-                                            tmpstr = ' '.join(words_p[1:])
-                                            tmpstr2 = tmpstr
-                                            newelement.limits = tmpstr2
-                                        else:
-                                            newelement.limited = 0
-                                            newelement.limits = ' '
-                                        '''
+                                        #assert len_covered == j
+                                        #assert have_first == -1
                                         newelement.limited = 0
                                         newelement.limits = ' '
 
@@ -1852,7 +1806,6 @@ def main(args):
                                     else:
                                         loss_threshold = 0
                                     # limited
-                                    #printf("limited\n")
                                     time_13s = time.time()
                                     time_test[12] += time_13s-time_11e
                                     for k in range(candidate_phrase_list_limit_count[j]):
@@ -1862,7 +1815,6 @@ def main(args):
                                         pos_end = cand.pos_end
                                         loss = cand.loss
                                         prob_align = cand.prob_align
-                                        #last_pos = [length, num_cov, i]
                                         firstword = get_first_word_and_length(cand.phrase, &have_first)
                                         new_loss = element.loss+loss
                                         # safe prune for search
@@ -1907,9 +1859,6 @@ def main(args):
                                         newelement.translation = newbuffer 
                                         newelement.hidden_state_id = new_state_id[i]
                                         stacks_limit_count[length+1][num_cov+len_covered] = add_stack_limited(stacks_limit[length+1][num_cov+len_covered], stacks_limit_count[length+1][num_cov+len_covered], newelement, len_src, params)
-                                        #time_14e = time.time()
-                                        #time_test[13] += time_14e-time_13s
-                                        #time_test[14] += time_14e-time_14s
                                     time_13e = time.time()
                                     time_test[13] += time_13e-time_13s
 
@@ -1939,8 +1888,6 @@ def main(args):
                     #print('=',len_src, '=')
                     #print_stack(stacks[length][len_src])
                     print_stack_finished(finished, finished_count)
-                #stacks = clean(stacks, length-1)
-                #stacks_limit = clean(stacks_limit, length-1)
                 length += 1
                 if length > len_src+decode_length:
                     break
