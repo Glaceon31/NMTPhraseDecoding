@@ -869,6 +869,37 @@ cdef int compare_loss_pair(loss_pair a, char *bt, float bl):
         return 1
 
 
+cdef get_best(loss_pair *best, int *best_count, int max_best, translation_status element):
+    cdef int i, j, pos, comp
+    if best_count[0] < max_best:
+        pos = best_count[0]
+        while pos >= 1:
+            comp = compare_loss_pair(best[pos-1], element.translation, element.translation_loss)
+            if comp == 1:
+                break
+            pos -= 1
+        if pos < best_count[0]:
+            for i in range(best_count[0], pos, -1):
+                best[i] = best[i-1]
+        best[pos].loss = element.translation_loss
+        best[pos].translation = element.translation
+        best_count[0] += 1
+        return
+    else:
+        pos = max_best
+        while pos >= 1:
+            comp = compare_loss_pair(best[pos-1], element.translation, element.translation_loss)
+            if comp == 1:
+                break
+            pos -= 1
+        if pos < max_best:
+            for i in range(max_best-1, pos, -1):
+                best[i] = best[i-1]
+            best[pos].loss = element.translation_loss
+            best[pos].translation = element.translation
+        return 
+    
+
 cdef int add_stack_limited(translation_status *stack_limit, int stack_limit_count, loss_pair *best_limit, int *best_limit_count, int max_best_limit, translation_status element, int len_src, params):
     cdef int i, j, pos, comp
     if best_limit_count[0] < max_best_limit:
@@ -914,8 +945,8 @@ cdef int add_stack_limited(translation_status *stack_limit, int stack_limit_coun
             return stack_limit_count
 
 
-cdef int add_stack(translation_status *stack, int stack_count, loss_pair *best, int *best_count, int max_best, translation_status element, int len_src, int beam_size, merge_status=None, max_status=1, verbose=0):
-    cdef int i, j 
+cdef int add_stack(translation_status *stack, int stack_count, translation_status element, int len_src, int beam_size, merge_status=None, max_status=1, verbose=0):
+    cdef int i, j, pos, comp 
     cdef translation_status tmp
     '''
     if strcmp(element.translation, 'after the peace summit between leaders of south and north korea in 2000 ,') == 0:
@@ -959,7 +990,7 @@ cdef int add_stack(translation_status *stack, int stack_count, loss_pair *best, 
                         stack[i].limits = element.limits
                         stack[i].previous = element.previous
                 return stack_count 
-    cdef int pos = 0
+    pos = 0
     #printf("add stack not same\n")
     if stack_count < beam_size:
         #printf("add stack not full\n")
@@ -1503,6 +1534,7 @@ cpdef main(args):
                     printf('best_limit_count: %d\n', best_limit_count)
                     printf('threshold_limit: %f\n', threshold_limit)
                 best_limit_count = 0
+                best_count = 0
                 time_null_start = time.time()
                 all_empty = 1
                 for num_cov in range(0, len_src+1):
@@ -1554,7 +1586,7 @@ cpdef main(args):
                             newelement.loss = new_loss
                             newelement.src2null_loss = total_src2null_loss
                             #printf('%d/%d add to %d/%d\n', length, num_cov, length, num_cov+1)
-                            stacks_count[length][num_cov+1] = add_stack(stacks[length][num_cov+1], stacks_count[length][num_cov+1], best, &best_count, max_best, newelement, len_src, params_c.beam_size, params.merge_status, params_c.keep_status_num)
+                            stacks_count[length][num_cov+1] = add_stack(stacks[length][num_cov+1], stacks_count[length][num_cov+1], newelement, len_src, params_c.beam_size, params.merge_status, params_c.keep_status_num)
                             time_1e = time.time()
                             time_test[1] += time_1e-time_1s
                             break
@@ -1715,7 +1747,7 @@ cpdef main(args):
                                     newelement.translation_loss += new_word_loss
                                     newelement.loss = new_loss
                                     #printf('%d/%d add to %d/%d\n', length, num_cov, length+1, num_cov)
-                                    stacks_count[length+1][num_cov] = add_stack(stacks[length+1][num_cov], stacks_count[length+1][num_cov], best, &best_count, max_best, newelement, len_src, params_c.beam_size, params.merge_status, params_c.keep_status_num)
+                                    stacks_count[length+1][num_cov] = add_stack(stacks[length+1][num_cov], stacks_count[length+1][num_cov], newelement, len_src, params_c.beam_size, params.merge_status, params_c.keep_status_num)
                             time_5e = time.time()
                             time_test[5] += time_5e-time_5s
                 time_limit_end = time.time()
@@ -1898,7 +1930,7 @@ cpdef main(args):
                                         newelement.translation_loss += loss
                                         newelement.loss = new_loss
                                         newelement.hidden_state_id = new_state_id[i]
-                                        stacks_count[length+1][num_cov+len_covered] = add_stack(stacks[length+1][num_cov+len_covered], stacks_count[length+1][num_cov+len_covered], best, &best_count, max_best, newelement, len_src, params_c.beam_size, params.merge_status, params_c.keep_status_num)
+                                        stacks_count[length+1][num_cov+len_covered] = add_stack(stacks[length+1][num_cov+len_covered], stacks_count[length+1][num_cov+len_covered], newelement, len_src, params_c.beam_size, params.merge_status, params_c.keep_status_num)
 
                                     time_11e = time.time()
                                     time_test[11] += time_11e-time_10s
@@ -1981,10 +2013,14 @@ cpdef main(args):
                                     length_penalty = get_lp(length+1, decode_alpha)
                                     newelement.loss /= length_penalty
                                     #print('to_finish:', new[0].encode('utf-8'), new[-1])
-                                    finished_count = add_stack(finished, finished_count, best, &best_count, max_best, newelement, len_src, params_c.beam_size)
+                                    finished_count = add_stack(finished, finished_count,  newelement, len_src, params_c.beam_size)
                                 time_eos_end = time.time()
                                 time_test[15] += time_eos_end-time_candidate_end
 
+                for num_cov in range(len_src+1):
+                    for idx in range(stacks_count[length+1][num_cov]):
+                        element = stacks[length+1][num_cov][idx]
+                        get_best(best, &best_count, max_best, element)
                 time_generate_end = time.time()
                 time_generate += time_generate_end-time_generate_start
                 if args.verbose:
