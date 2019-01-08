@@ -365,7 +365,7 @@ def read_files(names):
     return inputs
 
 
-cdef get_feature_map(translation_status stack[100][4], int *stack_count, translation_status *stack_limit[100], int *stack_limit_count, int len_src, ivocab_trg, hidden_state_pool, params, int maps[100][4], int maps_limit[100][10000]):
+cdef get_feature_map(translation_status stack[100][4], int *stack_count, translation_status *stack_limit[100], int *stack_limit_count, int len_src, ivocab_trg, hidden_state_pool, params, int maps[100][4], int maps_limit[100][10000], float threshold, float threshold_limit):
     #printf('get_feature_map\n')
     features = {}
     sentence_list = {}
@@ -379,6 +379,9 @@ cdef get_feature_map(translation_status stack[100][4], int *stack_count, transla
         for idx in range(stack_count[num_cov]):
             count += 1
             element = stack[num_cov][idx]
+            if element.translation_loss < threshold:
+                maps[num_cov][idx] = -1
+                continue
             found = 0
             if sentence_list.has_key(element.translation):
                 maps[num_cov][idx] = sentence_list[element.translation]
@@ -390,6 +393,9 @@ cdef get_feature_map(translation_status stack[100][4], int *stack_count, transla
         for idx in range(stack_limit_count[num_cov]):
             count += 1
             element = stack_limit[num_cov][idx]
+            if element.translation_loss < threshold_limit:
+                maps_limit[num_cov][idx] = -1
+                continue
             found = 0
             if sentence_list.has_key(element.translation):
                 maps_limit[num_cov][idx] = sentence_list[element.translation]
@@ -432,6 +438,7 @@ cdef get_feature_map(translation_status stack[100][4], int *stack_count, transla
                 maps_limit[num_cov][idx] = len(sentence_list)-1
                 new_hidden_pool.append(hidden_state_pool[element.hidden_state_id])
     '''
+    #printf("get feature map %d/%d\n", sentence_num, count)
     sen_ids_list = [0] * sentence_num
     for sen in sentence_list.keys():
         assert sen_ids_list[sentence_list[sen]] == 0
@@ -853,13 +860,61 @@ cdef int is_equal(float a, float b):
     return 0
 
 
-cdef int add_stack_limited(translation_status *stack_limit, int stack_limit_count, translation_status element, int len_src, params):
-    stack_limit[stack_limit_count] = element
-    stack_limit_count += 1
-    return stack_limit_count 
+cdef int compare_loss_pair(loss_pair a, char *bt, float bl):
+    if a.loss < bl:
+        return -1
+    elif a.loss == bl:
+        return 0
+    else:
+        return 1
 
 
-cdef int add_stack(translation_status *stack, int stack_count, translation_status element, int len_src, int beam_size, merge_status=None, max_status=1, verbose=0):
+cdef int add_stack_limited(translation_status *stack_limit, int stack_limit_count, loss_pair *best_limit, int *best_limit_count, int max_best_limit, translation_status element, int len_src, params):
+    cdef int i, j
+    if best_limit_count[0] < max_best_limit:
+        pos = best_limit_count[0]
+        while pos >= 1:
+            comp = compare_loss_pair(best_limit[pos-1], element.translation, element.translation_loss)
+            if comp == 0:
+                stack_limit[stack_limit_count] = element
+                stack_limit_count += 1
+                return stack_limit_count
+            elif comp == 1:
+                break
+            pos -= 1
+        if pos < best_limit_count[0]:
+            for i in range(best_limit_count[0], pos, -1):
+                best_limit[i] = best_limit[i-1]
+        best_limit[pos].loss = element.translation_loss
+        best_limit[pos].translation = element.translation
+        best_limit_count[0] += 1
+        stack_limit[stack_limit_count] = element
+        stack_limit_count += 1
+        return stack_limit_count
+    else:
+        pos = max_best_limit
+        while pos >= 1:
+            comp = compare_loss_pair(best_limit[pos-1], element.translation, element.translation_loss)
+            if comp == 0:
+                stack_limit[stack_limit_count] = element
+                stack_limit_count += 1
+                return stack_limit_count
+            elif comp == 1:
+                break
+            pos -= 1
+        if pos < max_best_limit:
+            for i in range(max_best_limit-1, pos, -1):
+                best_limit[i] = best_limit[i-1]
+            best_limit[pos].loss = element.translation_loss
+            best_limit[pos].translation = element.translation
+            stack_limit[stack_limit_count] = element
+            stack_limit_count += 1
+            return stack_limit_count
+        else:
+            return stack_limit_count
+
+
+cdef int add_stack(translation_status *stack, int stack_count, loss_pair *best, int *best_count, int max_best, translation_status element, int len_src, int beam_size, merge_status=None, max_status=1, verbose=0):
     cdef int i, j 
     cdef translation_status tmp
     '''
@@ -1155,6 +1210,8 @@ def main(args):
         # params
         int decode_length = params.decode_length
         float decode_alpha = params.decode_alpha
+        int max_best_limit = 32
+        int max_best = 32
         # universal
         int max_len_trg = 100
         int max_len_src = 100
@@ -1164,6 +1221,12 @@ def main(args):
         char *tmpstring
         phrase_pair *phrases_c
         automatons newautom
+        loss_pair *best_limit = <loss_pair*> malloc(max_best_limit*sizeof(loss_pair)) 
+        int best_limit_count = 0
+        float threshold_limit = -1000000
+        loss_pair *best = <loss_pair*> malloc(max_best_limit*sizeof(loss_pair)) 
+        int best_count = 0
+        float threshold = -1000000
         # encode & prepare
         float time_test[20]
         int count_test[20]
@@ -1423,10 +1486,23 @@ def main(args):
             time_test[19] = time_prepare_end-time_enc_end
             while True:
                 # source to null
-                time_null_start = time.time()
+                if best_limit_count > 0:
+                    threshold_limit = best_limit[best_limit_count-1].loss
+                else:
+                    threshold_limit = -100000
+                if best_count > 0:
+                    threshold = best[best_count-1].loss
+                else:
+                    threshold = -100000
                 if args.verbose:
                     printf('=== length: %d ===\n', length)
                     printf('== src2null ==\n')
+                    printf('best_count: %d\n', best_count)
+                    printf('threshold: %f\n', threshold)
+                    printf('best_limit_count: %d\n', best_limit_count)
+                    printf('threshold_limit: %f\n', threshold_limit)
+                best_limit_count = 0
+                time_null_start = time.time()
                 all_empty = 1
                 for num_cov in range(0, len_src+1):
                     if stacks_count[length][num_cov] == 0:
@@ -1477,7 +1553,7 @@ def main(args):
                             newelement.loss = new_loss
                             newelement.src2null_loss = total_src2null_loss
                             #printf('%d/%d add to %d/%d\n', length, num_cov, length, num_cov+1)
-                            stacks_count[length][num_cov+1] = add_stack(stacks[length][num_cov+1], stacks_count[length][num_cov+1], newelement, len_src, params_c.beam_size, params.merge_status, params_c.keep_status_num)
+                            stacks_count[length][num_cov+1] = add_stack(stacks[length][num_cov+1], stacks_count[length][num_cov+1], best, &best_count, max_best, newelement, len_src, params_c.beam_size, params.merge_status, params_c.keep_status_num)
                             time_1e = time.time()
                             time_test[1] += time_1e-time_1s
                             break
@@ -1495,7 +1571,7 @@ def main(args):
                 neural_result = [0]*(len_src+1)
                 neural_result_limit = [0]*(len_src+1)
                 time_ts = time.time()
-                features, num_x = get_feature_map(stacks[length], stacks_count[length], stacks_limit[length], stacks_limit_count[length], len_src, ivocab_trg, hidden_state_pool, params, maps, maps_limit)
+                features, num_x = get_feature_map(stacks[length], stacks_count[length], stacks_limit[length], stacks_limit_count[length], len_src, ivocab_trg, hidden_state_pool, params, maps, maps_limit, threshold, threshold_limit)
                 time_te = time.time()
                 time_test[17] += time_te-time_ts
                 count_test[2] += num_x
@@ -1528,16 +1604,24 @@ def main(args):
                     neural_result[num_cov] = [[], []]
                     for i in range(stacks_count[length][num_cov]):
                         pos = maps[num_cov][i]
-                        neural_result[num_cov][0].append(log_probs[pos])
-                        neural_result[num_cov][1].append(pos)
+                        if pos == -1:
+                            neural_result[num_cov][0].append(-1)
+                            neural_result[num_cov][1].append(-1)
+                        else:
+                            neural_result[num_cov][0].append(log_probs[pos])
+                            neural_result[num_cov][1].append(pos)
                 for num_cov in range(0, len_src+1):
                     if stacks_limit_count[length][num_cov] == 0:
                         continue
                     neural_result_limit[num_cov] = [[], []]
                     for i in range(stacks_limit_count[length][num_cov]):
                         pos = maps_limit[num_cov][i]
-                        neural_result_limit[num_cov][0].append(log_probs[pos])
-                        neural_result_limit[num_cov][1].append(pos)
+                        if pos == -1:
+                            neural_result_limit[num_cov][0].append(-1)
+                            neural_result_limit[num_cov][1].append(-1)
+                        else:
+                            neural_result_limit[num_cov][0].append(log_probs[pos])
+                            neural_result_limit[num_cov][1].append(pos)
                 #print('neural_result', neural_result)
                 #print('neural_result_limit', neural_result_limit)
                 time_neural_end = time.time()
@@ -1558,6 +1642,8 @@ def main(args):
                     if params_c.split_limited:
                         for i in range(stacks_limit_count[length][num_cov]):
                             element = stacks_limit[length][num_cov][i]
+                            if element.translation_loss < threshold_limit:
+                                continue
                             #assert sum(element[1]['coverage']) == num_cov
                             time_5s = time.time()
                             for nosense in range(1):
@@ -1605,7 +1691,7 @@ def main(args):
                                     newelement.translation_loss += new_word_loss
                                     newelement.loss = new_loss
                                     # warning: only works when keep_status_num == 1
-                                    stacks_limit_count[length+1][num_cov] = add_stack_limited(stacks_limit[length+1][num_cov], stacks_limit_count[length+1][num_cov], newelement, len_src, params)
+                                    stacks_limit_count[length+1][num_cov] = add_stack_limited(stacks_limit[length+1][num_cov], stacks_limit_count[length+1][num_cov], best_limit, &best_limit_count, max_best_limit, newelement, len_src, params)
                                 else:
                                     #printf('not still_limited\n')
                                     if can_addstack(stacks[length+1][num_cov], stacks_count[length+1][num_cov], new_loss, params_c.beam_size) == 0:
@@ -1628,7 +1714,7 @@ def main(args):
                                     newelement.translation_loss += new_word_loss
                                     newelement.loss = new_loss
                                     #printf('%d/%d add to %d/%d\n', length, num_cov, length+1, num_cov)
-                                    stacks_count[length+1][num_cov] = add_stack(stacks[length+1][num_cov], stacks_count[length+1][num_cov], newelement, len_src, params_c.beam_size, params.merge_status, params_c.keep_status_num)
+                                    stacks_count[length+1][num_cov] = add_stack(stacks[length+1][num_cov], stacks_count[length+1][num_cov], best, &best_count, max_best, newelement, len_src, params_c.beam_size, params.merge_status, params_c.keep_status_num)
                             time_5e = time.time()
                             time_test[5] += time_5e-time_5s
                 time_limit_end = time.time()
@@ -1644,6 +1730,8 @@ def main(args):
 
                     for i in range(stacks_count[length][num_cov]):
                         element = stacks[length][num_cov][i]
+                        if element.translation_loss < threshold:
+                            continue
                         for nosense in range(1):
                             visible = autom.states[element.automatons].visible
                             autostate = autom.states[element.automatons]
@@ -1809,7 +1897,7 @@ def main(args):
                                         newelement.translation_loss += loss
                                         newelement.loss = new_loss
                                         newelement.hidden_state_id = new_state_id[i]
-                                        stacks_count[length+1][num_cov+len_covered] = add_stack(stacks[length+1][num_cov+len_covered], stacks_count[length+1][num_cov+len_covered], newelement, len_src, params_c.beam_size, params.merge_status, params_c.keep_status_num)
+                                        stacks_count[length+1][num_cov+len_covered] = add_stack(stacks[length+1][num_cov+len_covered], stacks_count[length+1][num_cov+len_covered], best, &best_count, max_best, newelement, len_src, params_c.beam_size, params.merge_status, params_c.keep_status_num)
 
                                     time_11e = time.time()
                                     time_test[11] += time_11e-time_10s
@@ -1871,7 +1959,7 @@ def main(args):
                                         newbuffer[total_length] = 0
                                         newelement.translation = newbuffer 
                                         newelement.hidden_state_id = new_state_id[i]
-                                        stacks_limit_count[length+1][num_cov+len_covered] = add_stack_limited(stacks_limit[length+1][num_cov+len_covered], stacks_limit_count[length+1][num_cov+len_covered], newelement, len_src, params)
+                                        stacks_limit_count[length+1][num_cov+len_covered] = add_stack_limited(stacks_limit[length+1][num_cov+len_covered], stacks_limit_count[length+1][num_cov+len_covered], best_limit, &best_limit_count, max_best_limit, newelement, len_src, params)
                                     time_13e = time.time()
                                     time_test[13] += time_13e-time_13s
 
@@ -1892,7 +1980,7 @@ def main(args):
                                     length_penalty = get_lp(length+1, decode_alpha)
                                     newelement.loss /= length_penalty
                                     #print('to_finish:', new[0].encode('utf-8'), new[-1])
-                                    finished_count = add_stack(finished, finished_count, newelement, len_src, params_c.beam_size)
+                                    finished_count = add_stack(finished, finished_count, best, &best_count, max_best, newelement, len_src, params_c.beam_size)
                                 time_eos_end = time.time()
                                 time_test[15] += time_eos_end-time_candidate_end
 
