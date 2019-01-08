@@ -237,6 +237,8 @@ def default_parameters():
         decode_length=20,
         # phrase specific
         bpe_phrase=True,
+        max_limit=32,
+        max_normal=32,
         merge_status="max_align",
         keep_status_num=1,
         src2null_loss=1,
@@ -602,7 +604,7 @@ def print_phrases(phrases):
         print(tmp.encode('utf-8'))
 
 
-cdef print_stack(translation_status *stack, int len_src, int count):
+cdef void print_stack(translation_status *stack, int len_src, int count):
     cdef int i
     cdef int j
     for i in range(count):
@@ -619,7 +621,7 @@ cdef print_stack(translation_status *stack, int len_src, int count):
         printf('loss: %f\n\n', stack[i].loss)
 
 
-cdef print_stack_finished(translation_status *stack, int count):
+cdef void print_stack_finished(translation_status *stack, int count):
     cdef int i
     for i in range(count):
         printf('end%d: %s %f\n', i, stack[i].translation, stack[i].loss)
@@ -639,35 +641,6 @@ def find(words, cov, k):
             kpos = 0
             pos += 1
     return -1
-
-
-
-def clean(stacks, i):
-    if i < 0:
-        return stacks
-    for j in range(len(stacks[i])):
-        for k in range(len(stacks[i][j])):
-            stacks[i][j][k][2] = None
-    return stacks
-
-
-def generate_new(words_src, phrases, stack, length):
-    result = []
-    for tmp in stack:
-        part, cov, loss = tmp
-        for k in phrases.keys():
-            found = find(words_src, cov, k)
-            if found != -1:
-                cov_new = copy.deepcopy(cov)
-                for i in range(found[0], found[1]):
-                    cov_new[i] = 1
-                finish = is_finish(cov_new)
-                for p in phrases[k]:
-                    if not finish:
-                        result.append([(part+' '+p).strip(), cov_new, length+len(k.split(' '))])
-                    else:
-                        result.append([(part+' '+p+' <eos>').strip(), cov_new, length+len(k.split(' '))])
-    return result
 
 
 cdef int getid_word(ivocab, word):
@@ -769,14 +742,6 @@ def outdims(state, num_layers):
     return result
 
 
-def append_empty(stacks, length, cov_num):
-    while len(stacks) <= length:
-        stacks.append([])
-    while len(stacks[length]) <= cov_num:
-        stacks[length].append([])
-    return stacks
-
-
 cdef int can_addstack(translation_status *stack, int stack_count, float loss, int beam_size, float align_loss=-1):
     cdef int i
     if stack_count < beam_size:
@@ -823,35 +788,10 @@ def sorted_index(inp):
     tosort = sorted(tosort, key=lambda x: x[0], reverse=True)
     result = [i[1] for i in tosort]
     return result
-
-
-def argmax(array, avail, num):
-    tosort = []
-    for i in range(len(array)):
-        if avail[i] == 0:
-            tosort.append([array[i], i])
-    tosort = sorted(tosort, key=lambda x: x[0], reverse=True)
-    result = [i[1] for i in tosort]
-    return result[:num]
-    
+   
 
 def reverse_bpe(inp):
     return inp.replace('@@ ', '')
-
-
-def min_align_prob(statuses):
-    which = -1
-    minprob = 0
-    for key in statuses.keys():
-        if get_align_prob(key) < minprob:
-            minprob = get_align_prob(key)
-            which = key
-    return minprob, which
-
-
-def get_align_prob(status):
-    tmp = json.loads(status)
-    return tmp['align_prob']
 
 
 cdef int is_equal(float a, float b):
@@ -869,7 +809,7 @@ cdef int compare_loss_pair(loss_pair a, char *bt, float bl):
         return 1
 
 
-cdef get_best(loss_pair *best, int *best_count, int max_best, translation_status element):
+cdef void get_best(loss_pair *best, int *best_count, int max_best, translation_status element):
     cdef int i, j, pos, comp
     if best_count[0] < max_best:
         pos = best_count[0]
@@ -945,82 +885,51 @@ cdef int add_stack_limited(translation_status *stack_limit, int stack_limit_coun
             return stack_limit_count
 
 
-cdef int add_stack(translation_status *stack, int stack_count, translation_status element, int len_src, int beam_size, merge_status=None, max_status=1, verbose=0):
+cdef int add_stack(translation_status *stack, int stack_count, translation_status element, int len_src, int beam_size):
     cdef int i, j, pos, comp 
     cdef translation_status tmp
-    '''
-    if strcmp(element.translation, 'after the peace summit between leaders of south and north korea in 2000 ,') == 0:
-        printf('testing: %f; %f\n', element.loss, element.align_loss)
-    if verbose == 1:
-        printf('add stack: %s\n', element.translation)
-        printf('stack count %d/%d\n', stack_count, beam_size)
-        if stack_count > 0:
-            printf('add stack first: %s\n', stack[0].translation)
-    '''
-    if merge_status:
-        for i in range(stack_count):
-            #if element.translation == stack[i].translation: 
-            if strcmp(element.translation, stack[i].translation) == 0: 
-                #printf("add stack found same %d\n", i)
-                if max_status == 1:
-                    #assert stack[i].loss == element.loss
-                    if stack[i].loss < element.loss:
-                        #for j in range(len_src):
-                        #    stack[i].coverage[j] = element.coverage[j]
-                        stack[i].coverage = element.coverage
-                        stack[i].align_loss = element.align_loss
-                        stack[i].automatons = element.automatons
-                        stack[i].limited = element.limited
-                        stack[i].limits = element.limits
-                        stack[i].previous = element.previous
-                        stack[i].loss = element.loss
-                        j = i
-                        while j > 0 and stack[j].loss > stack[j-1].loss:
-                            tmp = stack[j-1]
-                            stack[j-1] = stack[j]
-                            stack[j] = tmp
-                            j -= 1
-                    elif is_equal(stack[i].loss, element.loss) == 1 and element.align_loss > stack[i].align_loss:
-                        #for j in range(len_src):
-                        #    stack[i].coverage[j] = element.coverage[j]
-                        stack[i].coverage = element.coverage
-                        stack[i].align_loss = element.align_loss
-                        stack[i].automatons = element.automatons
-                        stack[i].limited = element.limited
-                        stack[i].limits = element.limits
-                        stack[i].previous = element.previous
-                return stack_count 
+    for i in range(stack_count):
+        if strcmp(element.translation, stack[i].translation) == 0: 
+            if stack[i].loss < element.loss:
+                stack[i].coverage = element.coverage
+                stack[i].align_loss = element.align_loss
+                stack[i].automatons = element.automatons
+                stack[i].limited = element.limited
+                stack[i].limits = element.limits
+                stack[i].previous = element.previous
+                stack[i].loss = element.loss
+                j = i
+                while j > 0 and stack[j].loss > stack[j-1].loss:
+                    tmp = stack[j-1]
+                    stack[j-1] = stack[j]
+                    stack[j] = tmp
+                    j -= 1
+            elif is_equal(stack[i].loss, element.loss) == 1 and element.align_loss > stack[i].align_loss:
+                stack[i].coverage = element.coverage
+                stack[i].align_loss = element.align_loss
+                stack[i].automatons = element.automatons
+                stack[i].limited = element.limited
+                stack[i].limits = element.limits
+                stack[i].previous = element.previous
+            return stack_count 
     pos = 0
-    #printf("add stack not same\n")
     if stack_count < beam_size:
-        #printf("add stack not full\n")
         while pos < stack_count and element.loss < stack[pos].loss:
             pos += 1
         if pos < stack_count:
             for i in range(stack_count, pos, -1):
                 stack[i] = stack[i-1]
-        #pos = stack_count
         stack[pos] = element
         stack_count += 1
         return stack_count 
     else:
-        #printf("add stack full\n")
         while pos < beam_size and element.loss < stack[pos].loss:
             pos += 1
         if pos < beam_size:
             for i in range(beam_size-1, pos, -1):
                 stack[i] = stack[i-1]
-            #stack[pos] = copy_translation_status(element, len_src)
             stack[pos] = element
-        #printf('add stack pos %d\n', pos)
         return stack_count 
-
-
-def list_of_empty_list(num):
-    result = []
-    for i in range(num):
-        result.append([])
-    return result
 
 
 cdef char* get_first_word_and_length(char *inp, int *have_first):
@@ -1242,8 +1151,8 @@ cpdef main(args):
         int decode_length = params.decode_length
         float decode_alpha = params.decode_alpha
         int beam_size = params.beam_size
-        int max_best_limit = 32
-        int max_best = 32
+        int max_best_limit = params.max_limit
+        int max_best = params.max_normal
         # universal
         int max_len_trg = 100
         int max_len_src = 100
@@ -1586,7 +1495,7 @@ cpdef main(args):
                             newelement.loss = new_loss
                             newelement.src2null_loss = total_src2null_loss
                             #printf('%d/%d add to %d/%d\n', length, num_cov, length, num_cov+1)
-                            stacks_count[length][num_cov+1] = add_stack(stacks[length][num_cov+1], stacks_count[length][num_cov+1], newelement, len_src, params_c.beam_size, params.merge_status, params_c.keep_status_num)
+                            stacks_count[length][num_cov+1] = add_stack(stacks[length][num_cov+1], stacks_count[length][num_cov+1], newelement, len_src, beam_size)
                             time_1e = time.time()
                             time_test[1] += time_1e-time_1s
                             break
@@ -1747,7 +1656,7 @@ cpdef main(args):
                                     newelement.translation_loss += new_word_loss
                                     newelement.loss = new_loss
                                     #printf('%d/%d add to %d/%d\n', length, num_cov, length+1, num_cov)
-                                    stacks_count[length+1][num_cov] = add_stack(stacks[length+1][num_cov], stacks_count[length+1][num_cov], newelement, len_src, params_c.beam_size, params.merge_status, params_c.keep_status_num)
+                                    stacks_count[length+1][num_cov] = add_stack(stacks[length+1][num_cov], stacks_count[length+1][num_cov], newelement, len_src, beam_size)
                             time_5e = time.time()
                             time_test[5] += time_5e-time_5s
                 time_limit_end = time.time()
@@ -1781,8 +1690,6 @@ cpdef main(args):
                                     candidate_phrase_list_limit[j] = <candidate*> malloc(max_candidate*sizeof(candidate))
                                     candidate_phrase_list_count[j] = 0
                                     candidate_phrase_list_limit_count[j] = 0
-                                #candidate_phrase_list = list_of_empty_list(len_src+1)
-                                #candidate_phrase_list_limit = list_of_empty_list(len_src+1)
                                 all_covered = True
                                 for j in range(autom.states[element.automatons].num_visible):
                                     pos = visible[j]
@@ -1930,7 +1837,7 @@ cpdef main(args):
                                         newelement.translation_loss += loss
                                         newelement.loss = new_loss
                                         newelement.hidden_state_id = new_state_id[i]
-                                        stacks_count[length+1][num_cov+len_covered] = add_stack(stacks[length+1][num_cov+len_covered], stacks_count[length+1][num_cov+len_covered], newelement, len_src, params_c.beam_size, params.merge_status, params_c.keep_status_num)
+                                        stacks_count[length+1][num_cov+len_covered] = add_stack(stacks[length+1][num_cov+len_covered], stacks_count[length+1][num_cov+len_covered], newelement, len_src, beam_size)
 
                                     time_11e = time.time()
                                     time_test[11] += time_11e-time_10s
@@ -2013,7 +1920,7 @@ cpdef main(args):
                                     length_penalty = get_lp(length+1, decode_alpha)
                                     newelement.loss /= length_penalty
                                     #print('to_finish:', new[0].encode('utf-8'), new[-1])
-                                    finished_count = add_stack(finished, finished_count,  newelement, len_src, params_c.beam_size)
+                                    finished_count = add_stack(finished, finished_count,  newelement, len_src, beam_size)
                                 time_eos_end = time.time()
                                 time_test[15] += time_eos_end-time_candidate_end
 
