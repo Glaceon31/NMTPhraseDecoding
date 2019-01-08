@@ -870,7 +870,7 @@ cdef int compare_loss_pair(loss_pair a, char *bt, float bl):
 
 
 cdef int add_stack_limited(translation_status *stack_limit, int stack_limit_count, loss_pair *best_limit, int *best_limit_count, int max_best_limit, translation_status element, int len_src, params):
-    cdef int i, j
+    cdef int i, j, pos, comp
     if best_limit_count[0] < max_best_limit:
         pos = best_limit_count[0]
         while pos >= 1:
@@ -1055,12 +1055,12 @@ cdef int compare_candidate(candidate a, candidate b):
         return -1
 
 
-cdef int add_candidate_limit(candidate *candidate_list_limit, int count, candidate new, params):
+cdef int add_candidate_limit(candidate *candidate_list_limit, int count, candidate new):
     candidate_list_limit[count] = new
     return count+1 
 
 
-cdef int add_candidate(candidate *candidate_list, int count, candidate new, params):
+cdef int add_candidate(candidate *candidate_list, int count, candidate new, int beam_size):
     cdef int i, pos, comp
     cdef int have_same = 0
     '''
@@ -1072,7 +1072,7 @@ cdef int add_candidate(candidate *candidate_list, int count, candidate new, para
             else:
                 return count
     '''
-    if count < params.beam_size:
+    if count < beam_size:
         pos = count 
         while pos >= 1:
             comp = compare_candidate(candidate_list[pos-1], new)
@@ -1090,7 +1090,7 @@ cdef int add_candidate(candidate *candidate_list, int count, candidate new, para
         candidate_list[pos] = new
         return count+1
     else:
-        pos = params.beam_size
+        pos = beam_size
         while pos >=1:
             comp = compare_candidate(candidate_list[pos-1], new)
             if comp == 1:
@@ -1101,8 +1101,8 @@ cdef int add_candidate(candidate *candidate_list, int count, candidate new, para
             elif comp == 2 or comp == 100:
                 return count
             pos -= 1
-        if pos < params.beam_size:
-            for i in range(params.beam_size-1, pos, -1):
+        if pos < beam_size:
+            for i in range(beam_size-1, pos, -1):
                 candidate_list[i] = candidate_list[i-1]
             candidate_list[pos] = new
         return count
@@ -1186,7 +1186,7 @@ cdef float my_log(float x):
     else:
         return log(x)
 
-def main(args):
+cpdef main(args):
     tf.logging.set_verbosity(tf.logging.INFO)
     model_cls = models.get_model(args.model)
     params = default_parameters()
@@ -1210,6 +1210,7 @@ def main(args):
         # params
         int decode_length = params.decode_length
         float decode_alpha = params.decode_alpha
+        int beam_size = params.beam_size
         int max_best_limit = 32
         int max_best = 32
         # universal
@@ -1786,10 +1787,10 @@ def main(args):
                                                         new_candidate.loss = new_loss
                                                         new_candidate.prob_align = prob_align
                                                         if params_c.split_limited and have_first != -1:
-                                                            candidate_phrase_list_limit_count[len_bpe_phrase]= add_candidate_limit(candidate_phrase_list_limit[len_bpe_phrase], candidate_phrase_list_limit_count[len_bpe_phrase], new_candidate, params)
+                                                            candidate_phrase_list_limit_count[len_bpe_phrase]= add_candidate_limit(candidate_phrase_list_limit[len_bpe_phrase], candidate_phrase_list_limit_count[len_bpe_phrase], new_candidate)
                                                             #printf('limit count: %d\n', candidate_phrase_list_limit_count[len_bpe_phrase])
                                                         else:
-                                                            candidate_phrase_list_count[len_bpe_phrase] = add_candidate(candidate_phrase_list[len_bpe_phrase], candidate_phrase_list_count[len_bpe_phrase], new_candidate, params)
+                                                            candidate_phrase_list_count[len_bpe_phrase] = add_candidate(candidate_phrase_list[len_bpe_phrase], candidate_phrase_list_count[len_bpe_phrase], new_candidate, beam_size)
                                                         #printf('ADDED\n')
                                     time_phrase_end = time.time()
                                     time_test[7] += time_phrase_end-time_phrase_start
@@ -1813,9 +1814,9 @@ def main(args):
                                             new_candidate.loss = new_loss
                                             new_candidate.prob_align = prob_align
                                             if params_c.split_limited and have_first != -1:
-                                                candidate_phrase_list_limit_count[1] = add_candidate_limit(candidate_phrase_list_limit[1], candidate_phrase_list_limit_count[1], new_candidate, params)
+                                                candidate_phrase_list_limit_count[1] = add_candidate_limit(candidate_phrase_list_limit[1], candidate_phrase_list_limit_count[1], new_candidate)
                                             else:
-                                                candidate_phrase_list_count[1] = add_candidate(candidate_phrase_list[1], candidate_phrase_list_count[1], new_candidate, params)
+                                                candidate_phrase_list_count[1] = add_candidate(candidate_phrase_list[1], candidate_phrase_list_count[1], new_candidate, beam_size)
                                     time_word_end = time.time()
                                     time_test[8] += time_word_end-time_phrase_end
 
@@ -1832,7 +1833,7 @@ def main(args):
                                     new_candidate.pos_end = -1
                                     new_candidate.loss = new_loss
                                     new_candidate.prob_align = 1
-                                    candidate_phrase_list_count[0] = add_candidate(candidate_phrase_list[0], candidate_phrase_list_count[0], new_candidate, params)
+                                    candidate_phrase_list_count[0] = add_candidate(candidate_phrase_list[0], candidate_phrase_list_count[0], new_candidate, beam_size)
                                 time_ce = time.time()
                                 time_test[6] += time_ce-time_cs
                                 time_test[9] += time_ce-time_stop_start
