@@ -367,7 +367,7 @@ def read_files(names):
     return inputs
 
 
-cdef get_feature_map(translation_status stack[100][4], int *stack_count, translation_status *stack_limit[100], int *stack_limit_count, int len_src, ivocab_trg, hidden_state_pool, params, int maps[100][4], int maps_limit[100][10000], float threshold, float threshold_limit):
+cdef get_feature_map(translation_status stack[150][4], int *stack_count, translation_status *stack_limit[150], int *stack_limit_count, int len_src, ivocab_trg, hidden_state_pool, params, int maps[150][4], int *maps_limit[150], float threshold, float threshold_limit):
     #printf('get_feature_map\n')
     features = {}
     sentence_list = {}
@@ -1154,8 +1154,8 @@ cpdef main(args):
         int max_best_limit = params.max_limit
         int max_best = params.max_normal
         # universal
-        int max_len_trg = 100
-        int max_len_src = 100
+        int max_len_trg = 150
+        int max_len_src = 150
         int max_limit = 10000
         int max_candidate = 10000
         int i, j, k, len_tmp, pos, pos_end, offset
@@ -1174,10 +1174,10 @@ cpdef main(args):
         int len_src, length
         int *coverage
         translation_status element_init
-        translation_status stacks[100][100][4]
-        int stacks_count[100][100]
-        translation_status *stacks_limit[100][100]
-        int stacks_limit_count[100][100]
+        translation_status stacks[150][150][4]
+        int stacks_count[150][150]
+        translation_status *stacks_limit[150][150]
+        int stacks_limit_count[150][150]
         translation_status finished[4]
         int finished_count
         # src2null
@@ -1188,8 +1188,8 @@ cpdef main(args):
         float new_loss, new_word_loss
         float new_align_loss
         # neural
-        int maps[100][4]
-        int maps_limit[100][10000]
+        int maps[150][4]
+        int *maps_limit[150]
         int num_x
         # generation
         int len_covered, nosense, is_visible, num_total, tmp_id, have_first, total_length, len_first
@@ -1200,11 +1200,11 @@ cpdef main(args):
         char *firstword
         char *firstword2
         automatons_state autostate
-        candidate candidate_phrase_list[100][4]
-        candidate *candidate_phrase_list_limit[100]
+        candidate candidate_phrase_list[150][4]
+        candidate *candidate_phrase_list_limit[150]
         candidate new_candidate
-        int candidate_phrase_list_count[100]
-        int candidate_phrase_list_limit_count[100]
+        int candidate_phrase_list_count[150]
+        int candidate_phrase_list_limit_count[150]
         float length_penalty
     ###
 
@@ -1318,6 +1318,7 @@ cpdef main(args):
         count = 0
 
 
+        total_start = time.time()
         for input in inputs:
             time_test = [0]*20
             time_test_tag = [0]*20
@@ -1408,13 +1409,16 @@ cpdef main(args):
             element_init.previous = [0, 0, 0]
             element_init.loss = 0
             stacks[0][0][0] = element_init
-            stacks_count = [[0]*100]*100
+            stacks_count = [[0]*150]*150
             stacks_count[0][0] = 1
-            stacks_limit_count = [[0]*100]*100
-            for i in range(100):
-                for j in range(100):
+            stacks_limit_count = [[0]*150]*150
+            for i in range(150):
+                for j in range(150):
                     free(stacks_limit[i][j])
                     stacks_limit[i][j] = <translation_status*> malloc(max_limit * sizeof(translation_status))
+            for i in range(150):
+                maps_limit[i] = <int*> malloc(max_limit*sizeof(int))
+
             finished_count = 0
             length = 0
 
@@ -1465,11 +1469,11 @@ cpdef main(args):
                             continue
                         if element.limited == 1:
                             continue
-                        time_0s = time.time()
+                        #time_0s = time.time()
                         # not optimized
                         kmax = get_kmax(null_order, element.coverage, params_c.beam_size, autostate, golden=golden)
                         for nullpos in kmax:
-                            count_test[0] += 1
+                            #count_test[0] += 1
                             
                             assert element.coverage[nullpos] == 0
                             if params_c.src2null_loss:
@@ -1483,8 +1487,8 @@ cpdef main(args):
                             new_align_loss = element.align_loss+my_log(probs_null[nullpos])
                             if can_addstack(stacks[length][num_cov+1], stacks_count[length][num_cov+1], new_loss, params_c.beam_size, align_loss=new_align_loss) == 0:
                                 continue
-                            count_test[1] += 1
-                            time_1s = time.time()
+                            #count_test[1] += 1
+                            #time_1s = time.time()
                             newelement = copy_translation_status(element, len_src)
                             newelement.coverage[nullpos] = 1
                             newelement.align_loss = new_align_loss
@@ -1496,11 +1500,11 @@ cpdef main(args):
                             newelement.src2null_loss = total_src2null_loss
                             #printf('%d/%d add to %d/%d\n', length, num_cov, length, num_cov+1)
                             stacks_count[length][num_cov+1] = add_stack(stacks[length][num_cov+1], stacks_count[length][num_cov+1], newelement, len_src, beam_size)
-                            time_1e = time.time()
-                            time_test[1] += time_1e-time_1s
+                            #time_1e = time.time()
+                            #time_test[1] += time_1e-time_1s
                             break
-                        time_0e = time.time()
-                        time_test[0] += time_0e-time_0s
+                        #time_0e = time.time()
+                        #time_test[0] += time_0e-time_0s
                 time_null_end = time.time()
                 time_null += time_null_end-time_null_start
 
@@ -1587,9 +1591,9 @@ cpdef main(args):
                             if element.translation_loss < threshold_limit:
                                 continue
                             #assert sum(element[1]['coverage']) == num_cov
-                            time_5s = time.time()
+                            #time_5s = time.time()
                             for nosense in range(1):
-                                count_test[3] += 1
+                                #count_test[3] += 1
                                 #assert status['limit'][0] == "limited"
                                 #printf('point 1: %s\n', element.limits)
                                 pos = -1
@@ -1657,8 +1661,8 @@ cpdef main(args):
                                     newelement.loss = new_loss
                                     #printf('%d/%d add to %d/%d\n', length, num_cov, length+1, num_cov)
                                     stacks_count[length+1][num_cov] = add_stack(stacks[length+1][num_cov], stacks_count[length+1][num_cov], newelement, len_src, beam_size)
-                            time_5e = time.time()
-                            time_test[5] += time_5e-time_5s
+                            #time_5e = time.time()
+                            #time_test[5] += time_5e-time_5s
                 time_limit_end = time.time()
                 time_limit += time_limit_end-time_generate_start
 
@@ -1683,7 +1687,7 @@ cpdef main(args):
                             # no limitation
                             else:
                                 # candidate phrase list: list of [phrase, pos_start, pos_end, loss, align_loss]
-                                time_cs = time.time()
+                                #time_cs = time.time()
                                 for j in range(len_src+1):
                                     free(candidate_phrase_list_limit[j])
                                     #candidate_phrase_list[j] = <candidate*> malloc(max_candidate*sizeof(candidate))
@@ -1694,7 +1698,7 @@ cpdef main(args):
                                 for j in range(autom.states[element.automatons].num_visible):
                                     pos = visible[j]
                                     # bpe_phrase
-                                    time_phrase_start = time.time()
+                                    #time_phrase_start = time.time()
                                     if params_c.bpe_phrase:
                                         # find untranslated bpe phrase
                                         pos_end = pos
@@ -1714,7 +1718,7 @@ cpdef main(args):
                                                     # start translation
                                                     for j in range(len(phrases[bpe_phrase])):
                                                         # warning: need to build seperate candidate list for different number of covered words 
-                                                        count_test[4] += 1
+                                                        #count_test[4] += 1
                                                         phrase, prob_align = phrases[bpe_phrase][j]
                                                         tmpstr2 = phrase
                                                         firstword = get_first_word_and_length(tmpstr2, &have_first)
@@ -1731,8 +1735,8 @@ cpdef main(args):
                                                         else:
                                                             candidate_phrase_list_count[len_bpe_phrase] = add_candidate(candidate_phrase_list[len_bpe_phrase], candidate_phrase_list_count[len_bpe_phrase], new_candidate, beam_size)
                                                         #printf('ADDED\n')
-                                    time_phrase_end = time.time()
-                                    time_test[7] += time_phrase_end-time_phrase_start
+                                    #time_phrase_end = time.time()
+                                    #time_test[7] += time_phrase_end-time_phrase_start
                                     #generate from source word
                                     if element.coverage[pos] == 0:
                                         all_covered = False
@@ -1740,7 +1744,7 @@ cpdef main(args):
                                             continue
                                         num_total = len(phrases[words[pos]])
                                         for j in range(num_total):
-                                            count_test[5] += 1
+                                            #count_test[5] += 1
                                             phrase, prob_align = phrases[words[pos]][j] 
                                             tmpstr2 = phrase
                                             firstword = get_first_word_and_length(tmpstr2, &have_first) #0.25s/181w
@@ -1756,14 +1760,14 @@ cpdef main(args):
                                                 candidate_phrase_list_limit_count[1] = add_candidate_limit(candidate_phrase_list_limit[1], candidate_phrase_list_limit_count[1], new_candidate)
                                             else:
                                                 candidate_phrase_list_count[1] = add_candidate(candidate_phrase_list[1], candidate_phrase_list_count[1], new_candidate, beam_size)
-                                    time_word_end = time.time()
-                                    time_test[8] += time_word_end-time_phrase_end
+                                    #time_word_end = time.time()
+                                    #time_test[8] += time_word_end-time_phrase_end
 
                                 # generate from null2trg
-                                time_stop_start = time.time()
+                                #time_stop_start = time.time()
                                 for j in range(len(null2trg_vocab)):
                                     stopword = null2trg_vocab[j]
-                                    count_test[6] += 1
+                                    #count_test[6] += 1
                                     tmpstr2 = stopword
                                     tmp_id = getid_word(ivocab_trg, tmpstr2)
                                     new_loss = log_probs[i][tmp_id]
@@ -1773,9 +1777,9 @@ cpdef main(args):
                                     new_candidate.loss = new_loss
                                     new_candidate.prob_align = 1
                                     candidate_phrase_list_count[0] = add_candidate(candidate_phrase_list[0], candidate_phrase_list_count[0], new_candidate, beam_size)
-                                time_ce = time.time()
-                                time_test[6] += time_ce-time_cs
-                                time_test[9] += time_ce-time_stop_start
+                                #time_ce = time.time()
+                                #time_test[6] += time_ce-time_cs
+                                #time_test[9] += time_ce-time_stop_start
                                     
 
                                 #if args.verbose:
@@ -1783,16 +1787,16 @@ cpdef main(args):
                                 #    print('candidates:', candidate_phrase_list)
 
                                 #printf("processing candidates")
-                                time_candidate_start = time.time()
+                                #time_candidate_start = time.time()
                                 for j in range(len_src):
                                     #printf("processing candidates %d/%d/%d\n", num_cov, i, j)
                                     #printf("normal\n")
                                     if num_cov+j > len_src:
                                         continue
-                                    time_10s = time.time()
+                                    #time_10s = time.time()
                                     for k in range(candidate_phrase_list_count[j]):
                                         cand = candidate_phrase_list[j][k]
-                                        count_test[7] += 1
+                                        #count_test[7] += 1
                                         pos = cand.pos
                                         pos_end = cand.pos_end
                                         loss = cand.loss
@@ -1804,7 +1808,7 @@ cpdef main(args):
                                             continue
                                         if can_addstack(stacks[length+1][num_cov+1], stacks_count[length+1][num_cov+1], new_loss, params_c.beam_size) == 0:
                                             break
-                                        count_test[8] += 1
+                                        #count_test[8] += 1
                                         newelement = copy_translation_status(element, len_src)
                                         if pos >= 0:
                                             len_covered = pos_end-pos+1
@@ -1839,18 +1843,18 @@ cpdef main(args):
                                         newelement.hidden_state_id = new_state_id[i]
                                         stacks_count[length+1][num_cov+len_covered] = add_stack(stacks[length+1][num_cov+len_covered], stacks_count[length+1][num_cov+len_covered], newelement, len_src, beam_size)
 
-                                    time_11e = time.time()
-                                    time_test[11] += time_11e-time_10s
+                                    #time_11e = time.time()
+                                    #time_test[11] += time_11e-time_10s
                                     if stacks_count[length+1][num_cov+j] > 0:
                                         loss_threshold = stacks[length+1][num_cov+j][stacks_count[length+1][num_cov+j]-1].loss
                                     else:
                                         loss_threshold = 0
                                     # limited
-                                    time_13s = time.time()
-                                    time_test[12] += time_13s-time_11e
+                                    #time_13s = time.time()
+                                    #time_test[12] += time_13s-time_11e
                                     for k in range(candidate_phrase_list_limit_count[j]):
                                         cand = candidate_phrase_list_limit[j][k]
-                                        count_test[9] += 1
+                                        #count_test[9] += 1
                                         pos = cand.pos
                                         pos_end = cand.pos_end
                                         loss = cand.loss
@@ -1863,7 +1867,7 @@ cpdef main(args):
                                         # not safe prune
                                         if new_loss < loss_threshold:
                                             continue
-                                        count_test[10] += 1
+                                        #count_test[10] += 1
                                         #time_14s = time.time()
                                         newelement = copy_translation_status(element, len_src)
                                         if pos >= 0:
@@ -1900,11 +1904,11 @@ cpdef main(args):
                                         newelement.translation = newbuffer 
                                         newelement.hidden_state_id = new_state_id[i]
                                         stacks_limit_count[length+1][num_cov+len_covered] = add_stack_limited(stacks_limit[length+1][num_cov+len_covered], stacks_limit_count[length+1][num_cov+len_covered], best_limit, &best_limit_count, max_best_limit, newelement, len_src, params)
-                                    time_13e = time.time()
-                                    time_test[13] += time_13e-time_13s
+                                    #time_13e = time.time()
+                                    #time_test[13] += time_13e-time_13s
 
-                                time_candidate_end = time.time()
-                                time_test[10] += time_candidate_end-time_candidate_start
+                                #time_candidate_end = time.time()
+                                #time_test[10] += time_candidate_end-time_candidate_start
 
 
                                 if all_covered:
@@ -1921,8 +1925,8 @@ cpdef main(args):
                                     newelement.loss /= length_penalty
                                     #print('to_finish:', new[0].encode('utf-8'), new[-1])
                                     finished_count = add_stack(finished, finished_count,  newelement, len_src, beam_size)
-                                time_eos_end = time.time()
-                                time_test[15] += time_eos_end-time_candidate_end
+                                #time_eos_end = time.time()
+                                #time_test[15] += time_eos_end-time_candidate_end
 
                 for num_cov in range(len_src+1):
                     for idx in range(stacks_count[length+1][num_cov]):
@@ -2008,6 +2012,11 @@ cpdef main(args):
                     now = stacks[len_now-1][now[3][0]]
                     len_now -= 1
             '''
+            end = time.time()
+            print('sentence time:', end-start, 's')
+        total_end = time.time()
+        print('total time:', total_end-total_start, 's')
+
 
 if __name__ == "__main__":
     main(parse_args())
