@@ -1181,8 +1181,8 @@ cpdef main(args):
         # universal
         int max_len_trg = 150
         int max_len_src = 150
-        int max_limit = 10000
-        int max_candidate = 10000
+        int max_limit = 1000
+        int max_candidate = 1000
         int i, j, k, len_tmp, pos, pos_end, offset
         char *tmpstring
         #phrase_pair *phrases_c
