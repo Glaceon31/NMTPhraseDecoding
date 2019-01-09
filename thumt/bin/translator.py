@@ -310,6 +310,7 @@ def main(args):
             sess.run(assign_op, feed_dict=feed_dict)
             sess.run(init_op)
 
+            total_start = time.time()
             while True:
                 start = time.time()
                 try:
@@ -323,6 +324,8 @@ def main(args):
                     print('time:', end-start, 's')
                 except tf.errors.OutOfRangeError:
                     break
+            total_end = time.time()
+            print('total time:', total_end-total_start, 's')
 
         # Convert to plain text
         vocab = params.vocabulary["target"]
