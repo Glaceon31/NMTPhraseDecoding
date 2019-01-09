@@ -1185,7 +1185,7 @@ cpdef main(args):
         int max_candidate = 10000
         int i, j, k, len_tmp, pos, pos_end, offset
         char *tmpstring
-        phrase_pair *phrases_c
+        #phrase_pair *phrases_c
         automatons newautom
         loss_pair *best_limit = <loss_pair*> malloc(max_best_limit*sizeof(loss_pair)) 
         int best_limit_count = 0
@@ -1378,7 +1378,7 @@ cpdef main(args):
 
                 # generate a subset of phrase table for current translation
                 phrases, golden, words_result = subset(phrase_table, words, args.ngram, params, rbpe=args.rbpe, stopword_list=stoplist, goldphrase=goldphrase)
-                phrases_c = build_phrases_c(phrases)
+                #phrases_c = build_phrases_c(phrases)
                 words = words_result
                 phrases_reverse = reverse_phrase(phrases)
                 #print('reverse phrase:', phrases_reverse)
@@ -1390,6 +1390,7 @@ cpdef main(args):
                 if args.rbpe:
                     words = reverse_bpe(src).split(' ')
                     print('reverse_bpe:', reverse_bpe(src).encode('utf-8'))
+                free(coverage)
                 coverage = <int *> malloc(len_src * sizeof(int))
                 for i in range(len_src):
                     coverage[i] = 0
@@ -1443,6 +1444,7 @@ cpdef main(args):
                         free(stacks_limit[i][j])
                         stacks_limit[i][j] = <translation_status*> malloc(max_limit * sizeof(translation_status))
                 for i in range(150):
+                    free(maps_limit[i])
                     maps_limit[i] = <int*> malloc(max_limit*sizeof(int))
 
                 finished_count = 0
