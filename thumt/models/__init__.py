@@ -10,6 +10,7 @@ import thumt.models.rnnsearch
 import thumt.models.rnnsearch_lrp
 import thumt.models.transformer
 import thumt.models.transformer_lrp
+import thumt.models.src2null
 
 def get_model(name, lrp=False):
     name = name.lower()
@@ -26,5 +27,7 @@ def get_model(name, lrp=False):
             return thumt.models.transformer.Transformer
         else:
             return thumt.models.transformer_lrp.Transformer_lrp
+    elif name == "src2null":
+        return thumt.models.src2null.Src2null
     else:
         raise LookupError("Unknown model %s" % name)
