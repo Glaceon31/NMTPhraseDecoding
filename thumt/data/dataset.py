@@ -165,6 +165,85 @@ def get_training_input(filenames, params):
         return features
 
 
+def get_training_input_src2null(filenames, params):
+    """ Get input for training stage
+
+    :param filenames: A list contains [source_filename, target_filename]
+    :param params: Hyper-parameters
+
+    :returns: A dictionary of pair <Key, Tensor>
+    """
+
+    with tf.device("/cpu:0"):
+        src_dataset = tf.data.TextLineDataset(filenames[0])
+        tgt_dataset = tf.data.TextLineDataset(filenames[1])
+
+        dataset = tf.data.Dataset.zip((src_dataset, tgt_dataset))
+        dataset = dataset.shuffle(params.buffer_size)
+        dataset = dataset.repeat()
+
+        # Split string
+        dataset = dataset.map(
+            lambda src, tgt: (
+                tf.string_split([src]).values,
+                tf.string_to_number(tf.string_split([tgt]).values, tf.float32)
+            ),
+            num_parallel_calls=params.num_threads
+        )
+
+        # Append <eos> symbol
+        dataset = dataset.map(
+            lambda src, tgt: (
+                tf.concat([src, [tf.constant(params.eos)]], axis=0),
+                tgt
+            ),
+            num_parallel_calls=params.num_threads
+        )
+
+        # Convert to dictionary
+        dataset = dataset.map(
+            lambda src, tgt: {
+                "source": src,
+                "target": tgt,
+                "source_length": tf.shape(src),
+                "target_length": tf.shape(tgt)
+            },
+            num_parallel_calls=params.num_threads
+        )
+
+        # Create iterator
+        iterator = dataset.make_one_shot_iterator()
+        features = iterator.get_next()
+
+        # Create lookup table
+        src_table = tf.contrib.lookup.index_table_from_tensor(
+            tf.constant(params.vocabulary["source"]),
+            default_value=params.mapping["source"][params.unk]
+        )
+
+        # String to index lookup
+        features["source"] = src_table.lookup(features["source"])
+
+        # Batching
+        shard_multiplier = len(params.device_list) * params.update_cycle
+        features = batch_examples(features, params.batch_size,
+                                  params.max_length, params.mantissa_bits,
+                                  shard_multiplier=shard_multiplier,
+                                  length_multiplier=params.length_multiplier,
+                                  constant=params.constant_batch_size,
+                                  num_threads=params.num_threads)
+
+        # Convert to int32
+        features["source"] = tf.to_int32(features["source"])
+        #features["target"] = tf.to_int32(features["target"])
+        features["source_length"] = tf.to_int32(features["source_length"])
+        features["target_length"] = tf.to_int32(features["target_length"])
+        features["source_length"] = tf.squeeze(features["source_length"], 1)
+        features["target_length"] = tf.squeeze(features["target_length"], 1)
+
+        return features
+
+
 def sort_input_file(filename, reverse=True):
     # Read file
     with tf.gfile.Open(filename) as fd:
