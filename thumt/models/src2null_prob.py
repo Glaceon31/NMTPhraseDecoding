@@ -258,6 +258,7 @@ def model_graph(features, mode, params):
 class Src2null_prob(interface.NMTModel):
 
     def __init__(self, params, scope="transformer"):
+        print('src2null scope:', scope)
         super(Src2null_prob, self).__init__(params=params, scope=scope)
 
     def get_training_func(self, initializer, regularizer=None):

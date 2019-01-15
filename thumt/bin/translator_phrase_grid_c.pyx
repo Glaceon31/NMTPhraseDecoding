@@ -190,8 +190,12 @@ def parse_args():
                         help="Name of the model")
     parser.add_argument("--phrase", type=str, required=True,
                         help="Name of the phrase table")
-    parser.add_argument("--nullprob", type=str, required=True,
+    parser.add_argument("--nullprob", type=str,
                         help="probability for source word to null")
+    parser.add_argument("--neuralsrc2null", type=str,
+                        help="model for neural source word to null")
+    parser.add_argument("--model_s2n", type=str,
+                        help="Name of the model")
     parser.add_argument("--null2trg", type=str,
                         help="vocabulary for null to target word")
     parser.add_argument("--stoplist", type=str,
@@ -342,6 +346,25 @@ def set_variables(var_list, value_dict, prefix):
                 with tf.device("/cpu:0"):
                     op = tf.assign(var, value_dict[name])
                     ops.append(op)
+                break
+
+    return ops
+
+
+def set_variables_new(var_list, value_dict, prefix, feed_dict):
+    ops = []
+    for var in var_list:
+        for name in value_dict:
+            var_name = "/".join([prefix] + list(name.split("/")[1:]))
+
+            if var.name[:-2] == var_name:
+                tf.logging.debug("restoring %s -> %s" % (name, var.name))
+                placeholder = tf.placeholder(tf.float32,
+                                             name="placeholder/" + var_name)
+                with tf.device("/cpu:0"):
+                    op = tf.assign(var, placeholder)
+                    ops.append(op)
+                feed_dict[placeholder] = value_dict[name]
                 break
 
     return ops
@@ -1152,7 +1175,7 @@ cdef float my_log(float x):
         return log(x)
 
 cpdef main(args):
-    tf.logging.set_verbosity(tf.logging.INFO)
+    tf.logging.set_verbosity(tf.logging.DEBUG)
     model_cls = models.get_model(args.model)
     params = default_parameters()
 
@@ -1246,7 +1269,8 @@ cpdef main(args):
         #    phrase_table = json.load(open(args.tmpphrase, 'r'))
         #else:
         phrase_table = json.load(open(args.phrase, 'r'))
-        src2null_prob = json.load(open(args.nullprob ,'r'))
+        if args.nullprob:
+            src2null_prob = json.load(open(args.nullprob ,'r'))
         if args.null2trg:
             null2trg_vocab = load_null2trg(args.null2trg)
             print('null2trg vocab:', null2trg_vocab)
@@ -1310,38 +1334,62 @@ cpdef main(args):
 
         ops = set_variables(tf.trainable_variables(), values,
                             model_cls.get_name())
-        #scores = score_fn(features, params)
-
-        sess_creator = tf.train.ChiefSessionCreator(
-            config=session_config(params)
-        )
-
-        # Load checkpoint
-        tf.logging.info("Loading %s" % args.checkpoint)
-        var_list = tf.train.list_variables(args.checkpoint)
-        values = {}
-        reader = tf.train.load_checkpoint(args.checkpoint)
-
-        for (name, shape) in var_list:
-            if not name.startswith(model_cls.get_name()):
-                continue
-
-            tensor = reader.get_tensor(name)
-            values[name] = tensor
-
-        ops = set_variables(tf.trainable_variables(), values,
-                            model_cls.get_name())
         assign_op = tf.group(*ops)
 
-        # Create session
-        sess = tf.train.MonitoredSession(session_creator=sess_creator)
-        sess.run(assign_op)
 
         fd = tf.gfile.Open(args.output, "w")
 
         fout = open(args.output, 'w')
         count = 0
 
+        # loading neural src2null model
+        if args.neuralsrc2null:
+            print("test:", args.model_s2n)
+            model_cls_s2n = models.get_model(args.model_s2n)
+            name = model_cls_s2n.get_name()
+            model_s2n = model_cls_s2n(params, name+'_s2n')
+
+            # build src2null graph
+            enc_fn_s2n, dec_fn_s2n = model_s2n.get_inference_func()
+            p_enc_s2n = {}
+            #p_enc_s2n["source"] = tf.placeholder(tf.int32, [None,None], "source")
+            #p_enc_s2n["source_length"] = tf.placeholder(tf.int32, [None], "source_length")
+            enc_s2n = enc_fn_s2n(placeholder, params)
+            dec_s2n = dec_fn_s2n(placeholder, state, params)
+
+            # load checkpoiny
+            tf.logging.info("Loading src2null model %s" % args.neuralsrc2null) 
+            model_var_lists_s2n = []
+            var_list = tf.train.list_variables(args.neuralsrc2null)
+            values = {}
+            reader = tf.train.load_checkpoint(args.neuralsrc2null)
+            
+            all_var_list = tf.trainable_variables()
+            for v in all_var_list:
+                if v.name.startswith(name+'_s2n'):
+                    model_var_lists_s2n.append(v)
+            for (name1, shape) in var_list:
+                if not name1.startswith(name):
+                    continue
+                if name1.find("losses_avg") >= 0:
+                    continue
+                tensor = reader.get_tensor(name1)
+                values[name1] = tensor
+            
+            feed_dict_s2n = {}
+            ops_s2n = set_variables_new(all_var_list, values,
+                                name+'_s2n', feed_dict_s2n)
+            assign_op_s2n = tf.group(*ops_s2n)
+            init_op = tf.tables_initializer()
+
+
+
+        # Create session
+        sess = tf.train.MonitoredSession(session_creator=sess_creator)
+        sess.run(assign_op)
+        if args.neuralsrc2null:
+            sess.run(assign_op_s2n, feed_dict=feed_dict_s2n)
+            sess.run(init_op)
 
         total_start = time.time()
         for input in inputs:
@@ -1360,8 +1408,6 @@ cpdef main(args):
                 src = src.decode('utf-8')
                 words = src.split(' ')
                 len_src = len(words)
-                probs_null = [get_src2null_prob(src2null_prob, w) for w in words]
-                null_order = sorted_index(probs_null)
                 f_src = {}
                 f_src["source"] = [getid(ivocab_src, input) ]
                 f_src["source_length"] = [len(f_src["source"][0])] 
@@ -1373,6 +1419,25 @@ cpdef main(args):
                 time_enc_start = time.time()
                 time_test[18] = time_enc_start-start
                 encoder_state = sess.run(enc, feed_dict=feed_src)
+                if args.neuralsrc2null:
+                    enc_out_s2n = sess.run(enc_s2n, feed_dict=feed_src)
+                    enc_out_s2n = enc_out_s2n['encoder']
+                    feed_dec_s2n = {
+                        placeholder["source"]: f_src["source"],
+                        placeholder["source_length"] : f_src["source_length"],
+                        state["encoder"]: enc_out_s2n
+                    }
+                    result_s2n = sess.run(dec_s2n, feed_dict=feed_dec_s2n)
+                    probs_null = 1-result_s2n[0]
+                    print('result_s2n:', probs_null)
+                    #probs_null = [get_src2null_prob(src2null_prob, w) for w in words]
+                elif args.nullprob:
+                    probs_null = [get_src2null_prob(src2null_prob, w) for w in words]
+                else:
+                    printf("must provide a src2null prob\n")
+                    exit()
+                    
+                null_order = sorted_index(probs_null)
                 time_enc_end = time.time()
                 time_encode = time_enc_end-time_enc_start
 

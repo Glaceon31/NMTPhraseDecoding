@@ -67,8 +67,8 @@ if __name__ == "__main__":
 
     for i in range(len(lsrc)):
         reftmp = [t[i] for t in lrefs]
-        if args.hidden and args.compare and lhypo[i] == lcompare[i]:
-            continue
+        #if args.hidden and args.compare and lhypo[i] == lcompare[i]:
+        #    continue
         print('=== %d ===' %i)
         print('src:', lsrc[i])
         print('ours:', lhypo[i], '('+str(bleu(rbpe(lhypo[i]), reftmp, 4, verbose=True))+')')
