@@ -1285,7 +1285,7 @@ cpdef main(args):
         #    phrase_table = json.load(open(args.tmpphrase, 'r'))
         #else:
         phrase_table = json.load(open(args.phrase, 'r'))
-        if args.nullprob:
+        if args.nullprob and not args.neuralsrc2null:
             src2null_prob = json.load(open(args.nullprob ,'r'))
         if args.null2trg:
             null2trg_vocab = load_null2trg(args.null2trg)
@@ -1787,7 +1787,8 @@ cpdef main(args):
                                 #if element.limited == 1: 
                                 #    assert 0 == 1
                                 # no limitation
-                                else:
+                                #else:
+                                if True:
                                     # candidate phrase list: list of [phrase, pos_start, pos_end, loss, align_loss]
                                     #time_cs = time.time()
                                     for j in range(len_src+1):
