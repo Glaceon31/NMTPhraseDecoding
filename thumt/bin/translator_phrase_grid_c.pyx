@@ -126,9 +126,10 @@ cdef struct beam:
     translation_status *content
     int count
 
-
+'''
 cdef print_cand(candidate cand):
     printf("%s;%d %d;%f %f\n",cand.phrase, cand.pos, cand.pos_end, cand.loss, cand.prob_align)
+'''
 
 
 cdef struct candidate:
@@ -141,18 +142,18 @@ cdef struct phrase_pair:
     char *phrase
     float prob
 
-
+'''
 cdef phrase_pair* build_phrases_c(phrases):
     cdef phrase_pair* result = <phrase_pair*> malloc(500*sizeof(phrase_pair))
      
     return result
-
+'''
 
 cdef struct loss_pair:
     char *translation
     float loss
 
-
+'''
 cdef candidate copy_candidate(candidate cand):
     cdef candidate result
     #result.phrase = <char*> malloc(strlen(cand.phrase)*sizeof(char))
@@ -163,7 +164,7 @@ cdef candidate copy_candidate(candidate cand):
     result.loss = cand.loss
     result.prob_align = cand.prob_align
     return result
-
+'''
 
 cdef struct params_s:
     int beam_size, keep_status_num, split_limited, src2null_loss, bpe_phrase
@@ -939,8 +940,11 @@ cdef int add_stack(translation_status *stack, int stack_count, translation_statu
     for i in range(stack_count):
         if strcmp(element.translation, stack[i].translation) == 0: 
             if stack[i].loss < element.loss:
+                for j in range(len_src):
+                    stack[i].coverage[j] = element.coverage[j]
                 stack[i].coverage = element.coverage
                 stack[i].align_loss = element.align_loss
+                stack[i].src2null_loss = element.src2null_loss
                 stack[i].automatons = element.automatons
                 stack[i].limited = element.limited
                 stack[i].limits = element.limits
@@ -953,8 +957,11 @@ cdef int add_stack(translation_status *stack, int stack_count, translation_statu
                     stack[j] = tmp
                     j -= 1
             elif is_equal(stack[i].loss, element.loss) == 1 and element.align_loss > stack[i].align_loss:
+                for j in range(len_src):
+                    stack[i].coverage[j] = element.coverage[j]
                 stack[i].coverage = element.coverage
                 stack[i].align_loss = element.align_loss
+                stack[i].src2null_loss = element.src2null_loss
                 stack[i].automatons = element.automatons
                 stack[i].limited = element.limited
                 stack[i].limits = element.limits
@@ -1175,7 +1182,7 @@ cdef float my_log(float x):
         return log(x)
 
 cpdef main(args):
-    tf.logging.set_verbosity(tf.logging.DEBUG)
+    tf.logging.set_verbosity(tf.logging.INFO)
     model_cls = models.get_model(args.model)
     params = default_parameters()
 
@@ -1455,7 +1462,7 @@ cpdef main(args):
                 if args.rbpe:
                     words = reverse_bpe(src).split(' ')
                     print('reverse_bpe:', reverse_bpe(src).encode('utf-8'))
-                free(coverage)
+                #free(coverage)
                 coverage = <int *> malloc(len_src * sizeof(int))
                 for i in range(len_src):
                     coverage[i] = 0
@@ -1576,7 +1583,7 @@ cpdef main(args):
                                     new_loss = element.loss+my_log(probs_null[nullpos])
                                 else:
                                     new_loss = element.loss
-                                    #total_src2null_loss = 0
+                                    total_src2null_loss = 0
                                 new_align_loss = element.align_loss+my_log(probs_null[nullpos])
                                 if can_addstack(stacks[length][num_cov+1], stacks_count[length][num_cov+1], new_loss, params_c.beam_size, align_loss=new_align_loss) == 0:
                                     continue
@@ -1802,7 +1809,7 @@ cpdef main(args):
                                                 if pos_end+1 == autom.states[element.automatons].visible[k]:
                                                     is_visible = 1 
                                                     break
-                                            while is_visible == 1 and element.coverage[pos_end+1] == 0 and pos_end-pos < 3: #and words[pos_end].endswith('@@'):
+                                            while is_visible == 1 and element.coverage[pos_end+1] == 0 and pos_end-pos < 3 and pos_end < len_src-1: #and words[pos_end].endswith('@@'):
                                                 pos_end += 1
                                                 if pos_end > pos:
                                                     bpe_phrase = ' '.join(words[pos:pos_end+1])
@@ -1911,8 +1918,8 @@ cpdef main(args):
                                                     newelement.automatons = autostate.next_state
                                             else:
                                                 len_covered = 0
-                                            #assert len_covered == j
-                                            #assert have_first == -1
+                                            assert len_covered == j
+                                            assert have_first == -1
                                             newelement.limited = 0
                                             newelement.limits = ' '
 
@@ -1947,7 +1954,9 @@ cpdef main(args):
                                         #time_test[12] += time_13s-time_11e
                                         for k in range(candidate_phrase_list_limit_count[j]):
                                             cand = candidate_phrase_list_limit[j][k]
-                                            #count_test[9] += 1
+                                            #if length == 9 and num_cov == 8 and j == 3:
+                                            #    printf("testing: %s ; %s ; %d/%d\n", element.translation, cand.phrase, cand.pos, cand.pos_end)
+                                            count_test[9] += 1
                                             pos = cand.pos
                                             pos_end = cand.pos_end
                                             loss = cand.loss
@@ -1971,7 +1980,7 @@ cpdef main(args):
                                                     newelement.automatons = autostate.next_state
                                             else:
                                                 len_covered = 0
-                                            #assert len_covered == j
+                                            assert len_covered == j
                                             newelement.limited = 1
                                             tmpstr2 = cand.phrase+have_first+1
                                             newbuffer = <char*> malloc(strlen(tmpstr2)+1)
