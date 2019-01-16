@@ -468,7 +468,7 @@ cdef get_feature_map(translation_status stack[150][4], int *stack_count, transla
     #printf("get feature map %d/%d\n", sentence_num, count)
     sen_ids_list = [0] * sentence_num
     for sen in sentence_list.keys():
-        assert sen_ids_list[sentence_list[sen]] == 0
+        #assert sen_ids_list[sentence_list[sen]] == 0
         sen_ids_list[sentence_list[sen]] = getid(ivocab_trg, sen)
 
     #sen_ids_list = [getid(ivocab_trg, sentence) for sentence in sentence_list]
@@ -1262,6 +1262,15 @@ cpdef main(args):
         int candidate_phrase_list_limit_count[150]
         float length_penalty
     ###
+    for i in range(150):
+        for j in range(150):
+            #free(stacks_limit[i][j])
+            stacks_limit[i][j] = <translation_status*> malloc(max_limit * sizeof(translation_status))
+    for i in range(150):
+        #free(maps_limit[i])
+        maps_limit[i] = <int*> malloc(max_limit*sizeof(int))
+    for j in range(150):
+        candidate_phrase_list_limit[j] = <candidate*> malloc(max_candidate*sizeof(candidate))
 
     # Build Graph
     with tf.Graph().as_default():
@@ -1511,13 +1520,6 @@ cpdef main(args):
                 stacks_count = [[0]*150]*150
                 stacks_count[0][0] = 1
                 stacks_limit_count = [[0]*150]*150
-                for i in range(150):
-                    for j in range(150):
-                        free(stacks_limit[i][j])
-                        stacks_limit[i][j] = <translation_status*> malloc(max_limit * sizeof(translation_status))
-                for i in range(150):
-                    free(maps_limit[i])
-                    maps_limit[i] = <int*> malloc(max_limit*sizeof(int))
 
                 finished_count = 0
                 length = 0
@@ -1575,7 +1577,7 @@ cpdef main(args):
                             for nullpos in kmax:
                                 #count_test[0] += 1
                                 
-                                assert element.coverage[nullpos] == 0
+                                #assert element.coverage[nullpos] == 0
                                 if params_c.src2null_loss:
                                     total_src2null_loss = element.src2null_loss+my_log(probs_null[nullpos])
                                     if total_src2null_loss < -1*length:
@@ -1782,16 +1784,16 @@ cpdef main(args):
                                 visible = autom.states[element.automatons].visible
                                 autostate = autom.states[element.automatons]
                                 # limit (should not enter)
-                                if element.limited == 1: 
-                                    assert 0 == 1
+                                #if element.limited == 1: 
+                                #    assert 0 == 1
                                 # no limitation
                                 else:
                                     # candidate phrase list: list of [phrase, pos_start, pos_end, loss, align_loss]
                                     #time_cs = time.time()
                                     for j in range(len_src+1):
-                                        free(candidate_phrase_list_limit[j])
+                                        #free(candidate_phrase_list_limit[j])
                                         #candidate_phrase_list[j] = <candidate*> malloc(max_candidate*sizeof(candidate))
-                                        candidate_phrase_list_limit[j] = <candidate*> malloc(max_candidate*sizeof(candidate))
+                                        #candidate_phrase_list_limit[j] = <candidate*> malloc(max_candidate*sizeof(candidate))
                                         candidate_phrase_list_count[j] = 0
                                         candidate_phrase_list_limit_count[j] = 0
                                     all_covered = True
@@ -1918,8 +1920,8 @@ cpdef main(args):
                                                     newelement.automatons = autostate.next_state
                                             else:
                                                 len_covered = 0
-                                            assert len_covered == j
-                                            assert have_first == -1
+                                            #assert len_covered == j
+                                            #assert have_first == -1
                                             newelement.limited = 0
                                             newelement.limits = ' '
 
@@ -1980,7 +1982,7 @@ cpdef main(args):
                                                     newelement.automatons = autostate.next_state
                                             else:
                                                 len_covered = 0
-                                            assert len_covered == j
+                                            #assert len_covered == j
                                             newelement.limited = 1
                                             tmpstr2 = cand.phrase+have_first+1
                                             newbuffer = <char*> malloc(strlen(tmpstr2)+1)
