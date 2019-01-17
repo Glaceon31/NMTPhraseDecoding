@@ -587,15 +587,21 @@ cdef subset(phrases, words, ngram, params, rbpe=False, stopword_list=None, goldp
             #if cov:
             #    if cov[j-1] != 0:
             #        break
-            phrase = ' '.join(words[i:j])
-            if phrases.has_key(phrase):
-                if params.allow_src2stop:
-                    result[phrase] = phrases[phrase]
-                else:
-                    result[phrase] = filter_stop(phrases[phrase], stopword_list)
-                for k in range(i, j):
-                    covered[k] = 1
-                result[phrase] = to_ascii(result[phrase])
+            phrase_bpe = ' '.join(words[i:j])
+            if phrase_bpe == reverse_bpe_hard(phrase_bpe):
+                plist = [phrase_bpe]
+            else:
+                #print('subset split:', phrase_bpe.encode('utf-8'), reverse_bpe_hard(phrase_bpe).encode('utf-8'))
+                plist = [phrase_bpe, reverse_bpe_hard(phrase_bpe)]
+            for phrase in plist:
+                if phrases.has_key(phrase):
+                    if params.allow_src2stop:
+                        result[phrase] = phrases[phrase]
+                    else:
+                        result[phrase] = filter_stop(phrases[phrase], stopword_list)
+                    for k in range(i, j):
+                        covered[k] = 1
+                    result[phrase] = to_ascii(result[phrase])
     # special treatment for words with no phrase
     cdef char *tmpstr
     cdef float prob
@@ -841,6 +847,9 @@ def sorted_index(inp):
 
 def reverse_bpe(inp):
     return inp.replace('@@ ', '')
+
+def reverse_bpe_hard(inp):
+    return inp.replace('@@ ', '').replace('@@', '')
 
 
 cdef int is_equal(float a, float b):
@@ -1816,28 +1825,33 @@ cpdef main(args):
                                                 pos_end += 1
                                                 if pos_end > pos:
                                                     bpe_phrase = ' '.join(words[pos:pos_end+1])
+                                                    if bpe_phrase == reverse_bpe_hard(bpe_phrase):
+                                                        plist = [bpe_phrase]
+                                                    else:
+                                                        plist = [bpe_phrase, reverse_bpe_hard(bpe_phrase)]
                                                     len_bpe_phrase = pos_end-pos+1
-                                                    if phrases.has_key(bpe_phrase):
-                                                        # start translation
-                                                        for j in range(len(phrases[bpe_phrase])):
-                                                            # warning: need to build seperate candidate list for different number of covered words 
-                                                            #count_test[4] += 1
-                                                            phrase, prob_align = phrases[bpe_phrase][j]
-                                                            tmpstr2 = phrase
-                                                            firstword = get_first_word_and_length(tmpstr2, &have_first)
-                                                            tmp_id = getid_word(ivocab_trg, firstword)
-                                                            new_loss = log_probs[i][tmp_id]
-                                                            new_candidate.phrase = tmpstr2 
-                                                            new_candidate.pos = pos
-                                                            new_candidate.pos_end = pos_end
-                                                            new_candidate.loss = new_loss
-                                                            new_candidate.prob_align = prob_align
-                                                            if params_c.split_limited and have_first != -1:
-                                                                candidate_phrase_list_limit_count[len_bpe_phrase]= add_candidate_limit(candidate_phrase_list_limit[len_bpe_phrase], candidate_phrase_list_limit_count[len_bpe_phrase], new_candidate)
-                                                                #printf('limit count: %d\n', candidate_phrase_list_limit_count[len_bpe_phrase])
-                                                            else:
-                                                                candidate_phrase_list_count[len_bpe_phrase] = add_candidate(candidate_phrase_list[len_bpe_phrase], candidate_phrase_list_count[len_bpe_phrase], new_candidate, beam_size)
-                                                            #printf('ADDED\n')
+                                                    for bpe_phrase in plist:
+                                                        if phrases.has_key(bpe_phrase):
+                                                            # start translation
+                                                            for j in range(len(phrases[bpe_phrase])):
+                                                                # warning: need to build seperate candidate list for different number of covered words 
+                                                                #count_test[4] += 1
+                                                                phrase, prob_align = phrases[bpe_phrase][j]
+                                                                tmpstr2 = phrase
+                                                                firstword = get_first_word_and_length(tmpstr2, &have_first)
+                                                                tmp_id = getid_word(ivocab_trg, firstword)
+                                                                new_loss = log_probs[i][tmp_id]
+                                                                new_candidate.phrase = tmpstr2 
+                                                                new_candidate.pos = pos
+                                                                new_candidate.pos_end = pos_end
+                                                                new_candidate.loss = new_loss
+                                                                new_candidate.prob_align = prob_align
+                                                                if params_c.split_limited and have_first != -1:
+                                                                    candidate_phrase_list_limit_count[len_bpe_phrase]= add_candidate_limit(candidate_phrase_list_limit[len_bpe_phrase], candidate_phrase_list_limit_count[len_bpe_phrase], new_candidate)
+                                                                    #printf('limit count: %d\n', candidate_phrase_list_limit_count[len_bpe_phrase])
+                                                                else:
+                                                                    candidate_phrase_list_count[len_bpe_phrase] = add_candidate(candidate_phrase_list[len_bpe_phrase], candidate_phrase_list_count[len_bpe_phrase], new_candidate, beam_size)
+                                                                #printf('ADDED\n')
                                         #time_phrase_end = time.time()
                                         #time_test[7] += time_phrase_end-time_phrase_start
                                         #generate from source word
