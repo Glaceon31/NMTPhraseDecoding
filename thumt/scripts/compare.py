@@ -65,6 +65,8 @@ if __name__ == "__main__":
 
     print(len(lsrc))
 
+    worse = 0
+    better = 0
     for i in range(len(lsrc)):
         reftmp = [t[i] for t in lrefs]
         if args.hidden and args.compare and lhypo[i] == lcompare[i]:
@@ -76,9 +78,15 @@ if __name__ == "__main__":
         if args.compare:
             print('compare:', lcompare[i], '('+str(bleu(rbpe(lcompare[i]), reftmp, 4, verbose=True))+')')
         #print('oracle:', loracle[i], '('+str(bleu(rbpe(loracle[i]), reftmp, 4, verbose=True))+')')
+        if bleu(rbpe(lhypo[i]), reftmp, 4, verbose=True) > bleu(rbpe(lcompare[i]), reftmp, 4, verbose=True):
+            better += 1
+        elif bleu(rbpe(lhypo[i]), reftmp, 4, verbose=True) < bleu(rbpe(lcompare[i]), reftmp, 4, verbose=True):
+            worse += 1
         for r in range(len(reftmp)):
             print('ref'+str(r)+':', reftmp[r])
         print('\n')
         #if i == 100:
         #    break
+    print('better:', better)
+    print('worse:', worse)
 

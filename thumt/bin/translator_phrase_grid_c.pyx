@@ -50,6 +50,7 @@ cdef automatons automatons_build(words_src, punc, params):
     cdef int start, i, j
     if params.punc_border:
         start = 0
+        result.state_num = 0
         for i in range(length):
             if words_src[i] in punc:
                 result.states[result.state_num].num_visible = i+1-start
@@ -193,6 +194,8 @@ def parse_args():
                         help="Name of the phrase table")
     parser.add_argument("--nullprob", type=str,
                         help="probability for source word to null")
+    parser.add_argument("--puncfile", type=str,
+                        help="list of punctuations")
     parser.add_argument("--neuralsrc2null", type=str,
                         help="model for neural source word to null")
     parser.add_argument("--model_s2n", type=str,
@@ -248,6 +251,7 @@ def default_parameters():
         merge_status="max_align",
         keep_status_num=1,
         src2null_loss=1,
+        null2trg_prob=1.0,
         split_limited=0,
         allow_src2stop=1,
         use_golden=1,
@@ -1892,7 +1896,7 @@ cpdef main(args):
                                         new_candidate.pos = -1
                                         new_candidate.pos_end = -1
                                         new_candidate.loss = new_loss
-                                        new_candidate.prob_align = 1
+                                        new_candidate.prob_align = params.null2trg_prob
                                         candidate_phrase_list_count[0] = add_candidate(candidate_phrase_list[0], candidate_phrase_list_count[0], new_candidate, beam_size)
                                     #time_ce = time.time()
                                     #time_test[6] += time_ce-time_cs
