@@ -20,6 +20,7 @@ def parseargs():
     parser.add_argument("--input", type=str, required=True,
                         help="origin phrase-table.gz from Moses")
     parser.add_argument("--num_options", type=int, default=10)
+    parser.add_argument("--minprob", type=float, default=0.)
     parser.add_argument("--output", type=str, help="output path")
     parser.add_argument("--phrase", action="store_true", help="using high quality phrases")
     parser.add_argument("--prob", type=str, default="third", help="strategy for getprob")
@@ -95,7 +96,8 @@ if __name__ == "__main__":
                 findmax = False
                 current_trg = []
             else:
-                current_trg.append([trg, probs])
+                if get_prob(probs) > args.minprob:
+                    current_trg.append([trg, probs])
         if len(rbpe(src).split(' ')) == 1 and not findmax:
             current_src = src
             findmax = True

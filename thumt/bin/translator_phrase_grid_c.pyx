@@ -756,6 +756,15 @@ def load_null2trg(n2tfile):
     result = content.split('\n')
     if result[-1] == '':
         del result[-1]
+    result = [[tmp.split(' ')[0], float(tmp.split(' ')[1])] for tmp in result]
+    return result
+
+
+def load_line(filename):
+    content = open(filename, 'r').read()
+    result = content.split('\n')
+    if result[-1] == '':
+        del result[-1]
     return result
 
 
@@ -1224,8 +1233,8 @@ cpdef main(args):
         # universal
         int max_len_trg = 150
         int max_len_src = 150
-        int max_limit = 1000
-        int max_candidate = 1000
+        int max_limit = 5000
+        int max_candidate = 5000
         int i, j, k, len_tmp, pos, pos_end, offset
         char *tmpstring
         #phrase_pair *phrases_c
@@ -1303,7 +1312,7 @@ cpdef main(args):
         if args.null2trg:
             null2trg_vocab = load_null2trg(args.null2trg)
             print('null2trg vocab:', null2trg_vocab)
-        stoplist = load_null2trg(args.stoplist)
+        stoplist = load_line(args.stoplist)
         print('stoplist:', stoplist)
         goldphrase = None
         if params.use_golden:
@@ -1887,7 +1896,7 @@ cpdef main(args):
                                     # generate from null2trg
                                     #time_stop_start = time.time()
                                     for j in range(len(null2trg_vocab)):
-                                        stopword = null2trg_vocab[j]
+                                        stopword = null2trg_vocab[j][0]
                                         #count_test[6] += 1
                                         tmpstr2 = stopword
                                         tmp_id = getid_word(ivocab_trg, tmpstr2)
@@ -1896,7 +1905,7 @@ cpdef main(args):
                                         new_candidate.pos = -1
                                         new_candidate.pos_end = -1
                                         new_candidate.loss = new_loss
-                                        new_candidate.prob_align = params.null2trg_prob
+                                        new_candidate.prob_align = null2trg_vocab[j][1] #params.null2trg_prob
                                         candidate_phrase_list_count[0] = add_candidate(candidate_phrase_list[0], candidate_phrase_list_count[0], new_candidate, beam_size)
                                     #time_ce = time.time()
                                     #time_test[6] += time_ce-time_cs

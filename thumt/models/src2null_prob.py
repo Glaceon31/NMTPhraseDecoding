@@ -223,7 +223,6 @@ def decoding_graph(features, state, mode, params):
     if mode == "infer":
         prob = tf.sigmoid(logits)
         prob = tf.reshape(prob, tf.shape(src_seq))
-        prob = tf.Print(prob, [tf.shape(prob)], summarize=100)
         return tf.reshape(prob, tf.shape(src_seq))
 
     labels = tf.pad(features["target"], [[0,0],[0,1]])
