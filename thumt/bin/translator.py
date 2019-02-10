@@ -67,7 +67,7 @@ def default_parameters():
         beam_size=4,
         decode_alpha=0.6,
         decode_length=50,
-        decode_batch_size=1,
+        decode_batch_size=32,
         # sampling
         generate_samples=False,
         num_samples=1,

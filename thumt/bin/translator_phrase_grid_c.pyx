@@ -41,7 +41,7 @@ cdef struct automatons_state:
 
 cdef struct automatons:
     int state_num
-    automatons_state states[10]
+    automatons_state states[20]
 
 
 cdef automatons automatons_build(words_src, punc, params):
@@ -81,6 +81,7 @@ cdef automatons automatons_build(words_src, punc, params):
 
 cdef print_autom(automatons autom):
     cdef int i, j
+    printf("total state num:%d\n", autom.state_num)
     for i in range(autom.state_num):
         printf("state %d:", i)
         printf("visible {")
@@ -251,6 +252,7 @@ def default_parameters():
         merge_status="max_align",
         keep_status_num=1,
         src2null_loss=1,
+        src2null_lambda=1.0,
         null2trg_prob=1.0,
         split_limited=0,
         allow_src2stop=1,
@@ -1227,6 +1229,7 @@ cpdef main(args):
         # params
         int decode_length = params.decode_length
         float decode_alpha = params.decode_alpha
+        float src2null_lambda = params.src2null_lambda
         int beam_size = params.beam_size
         int max_best_limit = params.max_limit
         int max_best = params.max_normal
@@ -1283,6 +1286,7 @@ cpdef main(args):
         int candidate_phrase_list_count[150]
         int candidate_phrase_list_limit_count[150]
         float length_penalty
+        float end_s2n_loss
     ###
     for i in range(150):
         for j in range(150):
@@ -1604,7 +1608,7 @@ cpdef main(args):
                                     total_src2null_loss = element.src2null_loss+my_log(probs_null[nullpos])
                                     if total_src2null_loss < -1*length:
                                         continue
-                                    new_loss = element.loss+my_log(probs_null[nullpos])
+                                    new_loss = element.loss+src2null_lambda*my_log(probs_null[nullpos])
                                 else:
                                     new_loss = element.loss
                                     total_src2null_loss = 0
