@@ -252,6 +252,7 @@ def default_parameters():
         merge_status="max_align",
         keep_status_num=1,
         src2null_loss=1,
+        filter_src2null_loss=1,
         src2null_lambda=1.0,
         null2trg_prob=1.0,
         split_limited=0,
@@ -1606,7 +1607,7 @@ cpdef main(args):
                                 #assert element.coverage[nullpos] == 0
                                 if params_c.src2null_loss:
                                     total_src2null_loss = element.src2null_loss+my_log(probs_null[nullpos])
-                                    if total_src2null_loss < -1*length:
+                                    if params.filter_src2null_loss == 1 and total_src2null_loss < -1*length:
                                         continue
                                     new_loss = element.loss+src2null_lambda*my_log(probs_null[nullpos])
                                 else:
