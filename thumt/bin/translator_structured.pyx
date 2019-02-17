@@ -94,7 +94,6 @@ cdef search_tag_inner(automatons autom, int state_start, int state_end, tags):
     while current != state_start:
         result = tags[current][0]+result
         current = autom.states[current].outer
-    print('inner:', state_start, state_end, result)
     return result
         
 
@@ -107,7 +106,6 @@ cdef search_tag_outer(automatons autom, int state_start, int state_end, tags):
         elif autom.states[current].outer != -1:
             result += tags[current][1]
             current = autom.states[current].outer
-    print('outer1:', state_start, state_end, result)
     return result
     
 
@@ -182,15 +180,20 @@ cdef automatons automatons_build_structured(words_src, punc, params):
             pos += 1
         else:
             pos += 1
-        for i in range(result.state_num):
-            all_visible, all_visible_state = get_all_visible(result, i)
-            all_visible_sorted = sorted(zip(all_visible, all_visible_state), key=lambda x:x[0], reverse=False)
-            result.states[i].num_all_visible = len(all_visible)
-            result.states[i].all_visible = <int *> malloc(result.states[i].num_all_visible*sizeof(int))
-            result.states[i].all_visible_state = <int *> malloc(result.states[i].num_all_visible*sizeof(int))
-            for j in range(result.states[i].num_all_visible):
-                result.states[i].all_visible[j] = all_visible_sorted[j][0]
-                result.states[i].all_visible_state[j] = all_visible_sorted[j][1]
+    result.states[current_state].visible = <int *> malloc(len(ranges[current_state])*sizeof(int))
+    for j in range(len(ranges[current_state])):
+        result.states[current_state].visible[j] = ranges[current_state][j]
+    result.states[current_state].num_visible = len(ranges[current_state])
+
+    for i in range(result.state_num):
+        all_visible, all_visible_state = get_all_visible(result, i)
+        all_visible_sorted = sorted(zip(all_visible, all_visible_state), key=lambda x:x[0], reverse=False)
+        result.states[i].num_all_visible = len(all_visible)
+        result.states[i].all_visible = <int *> malloc(result.states[i].num_all_visible*sizeof(int))
+        result.states[i].all_visible_state = <int *> malloc(result.states[i].num_all_visible*sizeof(int))
+        for j in range(result.states[i].num_all_visible):
+            result.states[i].all_visible[j] = all_visible_sorted[j][0]
+            result.states[i].all_visible_state[j] = all_visible_sorted[j][1]
     return result
 
 
@@ -370,7 +373,7 @@ cdef int to_next_state(automatons autom, int current_state, int *coverage):
     '''
     result = current_state
     while state_finish(autom, result, coverage):
-        print(current_state, result)
+        #print(current_state, result)
         if autom.states[result].next_state != -1:
             result = autom.states[result].next_state
         elif autom.states[result].outer != -1:
@@ -1171,12 +1174,17 @@ cdef get_kmax(sorted_array, int *avail, int num, automatons autom, int current_s
             isvisible = 0
             newstate = -1
             state = autom.states[current_state]
+            for i in range(state.num_visible):
+                if sorted_array[pos] == state.visible[i]:
+                    isvisible = 1
+                    newstate = current_state
+                    break
+            '''
             for i in range(state.num_all_visible):
                 if sorted_array[pos] == state.all_visible[i]:
                     isvisible = 1
                     newstate = state.all_visible_state[i]
                     break
-            '''
             for i in range(state.num_inner):
                 if isvisible:
                     break
@@ -1187,6 +1195,7 @@ cdef get_kmax(sorted_array, int *avail, int num, automatons autom, int current_s
                         break
             '''
             if isvisible:
+                #print(pos, '/', sorted_array[pos], '/', len(golden))
                 if golden[sorted_array[pos]] == 0:
                     result.append(sorted_array[pos])
                     newstates.append(newstate)
@@ -1796,21 +1805,22 @@ cpdef main(args):
                 src = src.decode('utf-8')
                 #words = src.split(' ')
                 words = splitline(src)
-                print('words:', words)
+                #print('words:', words)
                 # build automatons
                 autom = automatons_build_structured(words, punc, params)
                 words, tags = automatons_build_structured_other(words, punc, params)
-                print('words_notag:', words)
+                #print('words_notag:', words)
                 # words = ***(words)
                 print_autom(autom)
-                print('tags:', tags)
+                #print('tags:', tags)
                 ##
                 len_src = len(words)
+                #print("len_src:", len_src)
                 f_src = {}
                 #f_src["source"] = [getid(ivocab_src, input) ]
                 f_src["source"] = [getid_nosplit(ivocab_src, [w.encode('utf-8') for w in words]) ]
                 f_src["source_length"] = [len(f_src["source"][0])] 
-                print('input_enc', f_src)
+                #print('input_enc', f_src)
                 feed_src = {
                     placeholder["source"]: f_src["source"],
                     placeholder["source_length"] : f_src["source_length"]
@@ -1846,7 +1856,7 @@ cpdef main(args):
                 words = words_result
                 phrases_reverse = reverse_phrase(phrases)
                 #print('reverse phrase:', phrases_reverse)
-                print(count)
+                #print(count)
                 print('source:', src.encode('utf-8'))
                 if args.verbose:
                     print('golden:', golden)
@@ -2485,7 +2495,7 @@ cpdef main(args):
             '''
             
 
-            fout.write((result.replace(' <eos>', '').strip()+'\n').encode('utf-8'))
+            #fout.write((result.replace(' <eos>', '').strip()+'\n').encode('utf-8'))
             print((result.replace(' <eos>', '').strip()).encode('utf-8'))
 
             end = time.time()
@@ -2502,48 +2512,56 @@ cpdef main(args):
                 print('time:', zip(time_test_tag, time_test))
 
             # rewinding
+            lastpos = finished[0].previous
+            current_state = finished[0].automatons
             if args.verbose:
                 print('start rewinding...')
                 print('src:', src.encode('utf-8'))
                 print('trg:', finished[0].translation.replace(' <eos>', '').strip().encode('utf-8'))
-                lastpos = finished[0].previous
-                current_state = finished[0].automatons
                 printf('first lastpos: [%d %d %d]. middlestate: %d. finalstate: %d\n', lastpos[0], lastpos[1], lastpos[2], finished[0].middle_state, current_state)
-                words_trg = finished[0].translation.replace(' <eos>', '').strip().split(' ')
-                now = stacks[lastpos[0]][lastpos[1]][lastpos[2]]
-                while True:
+            words_trg = finished[0].translation.replace(' <eos>', '').strip().split(' ')
+            now = stacks[lastpos[0]][lastpos[1]][lastpos[2]]
+            null_outer = ''
+            while True:
+                if args.verbose:
                     print('===')
-                    last_cov = now.coverage
-                    last_words = len(now.translation.split(' '))
-                    lastpos = now.previous
-                    current_state = now.automatons
-                    last_middle_state = now.middle_state
+                last_cov = now.coverage
+                last_words = len(now.translation.split(' '))
+                lastpos = now.previous
+                current_state = now.automatons
+                last_middle_state = now.middle_state
+                if args.verbose:
                     printf('lastpos: [%d %d %d]. middlestate: %d. finalstate: %d\n', lastpos[0], lastpos[1], lastpos[2], now.middle_state, current_state)
-                    now_words = lastpos[0]
-                    #print(now_words, last_words)
-                    trg_word = ' '.join(words_trg[now_words:last_words])
-                    #print(lastpos)
-                    now = stacks[lastpos[0]][lastpos[1]][lastpos[2]]
-                    printf('now: middlestate: %d. finalstate: %d\n', now.middle_state, current_state)
-                    src_word = ''
-                    for i in range(len_src):
-                        if last_cov[i] == 1 and now.coverage[i] == 0:
-                            src_word += ' '+words[i]
-                    if src_word == '':
-                        src_word = '<null>'
-                    if trg_word == '':
-                        trg_word = '<null>'
+                now_words = lastpos[0]
+                trg_word = ' '.join(words_trg[now_words:last_words])
+                now = stacks[lastpos[0]][lastpos[1]][lastpos[2]]
+                #printf('now: middlestate: %d. finalstate: %d\n', now.middle_state, current_state)
+                src_word = ''
+                for i in range(len_src):
+                    if last_cov[i] == 1 and now.coverage[i] == 0:
+                        src_word += ' '+words[i]
+                if src_word == '':
+                    src_word = '<null>'
+                if trg_word == '':
+                    trg_word = '<null>'
+                if args.verbose:
                     print(src_word.encode('utf-8'), '-', trg_word)
-                    if src_word != '<null>' and current_state != last_middle_state:
-                        words_trg[last_words-1] += search_tag_outer(autom, last_middle_state, current_state, tags)
-                    if src_word != '<null>' and now.automatons != last_middle_state:
-                        words_trg[now_words] = search_tag_inner(autom, now.automatons, last_middle_state, tags) + words_trg[now_words]
-                    if strcmp(now.translation, '') == 0:
-                        break
-                    #if lastpos[0] == 0 and lastpos[1] == 0:
-                    #    break
+                if trg_word == '<null>' and current_state != last_middle_state:
+                    null_outer += search_tag_outer(autom, last_middle_state, current_state, tags)
+                elif src_word != '<null>' and current_state != last_middle_state:
+                    words_trg[last_words-1] += search_tag_outer(autom, last_middle_state, current_state, tags)
+                if src_word != '<null>' and trg_word != '<null>':
+                    words_trg[last_words-1] += null_outer
+                    null_outer = ''
+                if src_word != '<null>' and now.automatons != last_middle_state:
+                    words_trg[now_words] = search_tag_inner(autom, now.automatons, last_middle_state, tags) + words_trg[now_words]
+                if strcmp(now.translation, '') == 0:
+                    break
+                #if lastpos[0] == 0 and lastpos[1] == 0:
+                #    break
                     
-            print('final:', ' '.join(words_trg))
+            print('final:', ' '.join(words_trg).encode('utf-8'))
+            fout.write((' '.join(words_trg).strip()+'\n').encode('utf-8'))
             '''
             if args.verbose:
                 len_now = len(finished[0][0].split(' '))-1
