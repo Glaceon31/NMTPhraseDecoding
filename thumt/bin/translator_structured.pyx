@@ -35,7 +35,7 @@ from libc.math cimport pow, log
 
 cdef struct automatons_state:
     int next_state
-    int inner[10]
+    int inner[20]
     int num_inner
     int outer
     int *visible
@@ -138,7 +138,7 @@ cdef automatons automatons_build_structured(words_src, punc, params):
         if not is_tag(words_src[pos]):
             words_result.append(words_src[pos])
             ranges[current_state].append(pos_result)
-            if words_src[pos] in punc:
+            if params.punc_border and words_src[pos] in punc:
                 result.states[current_state].next_state = result.state_num
                 result.states[result.state_num].outer = result.states[current_state].outer
                 result.states[result.state_num].pos_end = result.states[current_state].pos_end
@@ -218,7 +218,7 @@ def automatons_build_structured_other(words_src, punc, params):
         if not is_tag(words_src[pos]):
             words_result.append(words_src[pos])
             ranges[current_state].append(pos_result)
-            if words_src[pos] in punc:
+            if params.punc_border and words_src[pos] in punc:
                 tags.append(['',''])
                 result.states[current_state].next_state = result.state_num
                 result.states[result.state_num].outer = result.states[current_state].outer
@@ -2015,7 +2015,8 @@ cpdef main(args):
                         break
 
                     # do the neural
-                    #printf('start neural prepare\n')
+                    if args.verbose:
+                        printf('start neural prepare\n')
                     time_neural_start = time.time()
                     neural_result = [0]*(len_src+1)
                     neural_result_limit = [0]*(len_src+1)
@@ -2547,21 +2548,22 @@ cpdef main(args):
                 if args.verbose:
                     print(src_word.encode('utf-8'), '-', trg_word)
                 if trg_word == '<null>' and current_state != last_middle_state:
-                    null_outer += search_tag_outer(autom, last_middle_state, current_state, tags)
+                    null_outer += ' '+search_tag_outer(autom, last_middle_state, current_state, tags)
                 elif src_word != '<null>' and current_state != last_middle_state:
-                    words_trg[last_words-1] += search_tag_outer(autom, last_middle_state, current_state, tags)
+                    words_trg[last_words-1] += ' '+search_tag_outer(autom, last_middle_state, current_state, tags)
                 if src_word != '<null>' and trg_word != '<null>':
                     words_trg[last_words-1] += null_outer
                     null_outer = ''
                 if src_word != '<null>' and now.automatons != last_middle_state:
-                    words_trg[now_words] = search_tag_inner(autom, now.automatons, last_middle_state, tags) + words_trg[now_words]
+                    words_trg[now_words] = search_tag_inner(autom, now.automatons, last_middle_state, tags) +' '+ words_trg[now_words]
                 if strcmp(now.translation, '') == 0:
                     break
                 #if lastpos[0] == 0 and lastpos[1] == 0:
                 #    break
                     
+
             print('final:', ' '.join(words_trg).encode('utf-8'))
-            fout.write((' '.join(words_trg).strip()+'\n').encode('utf-8'))
+            fout.write((' '.join(' '.join(words_trg).split()).strip()+'\n').encode('utf-8'))
             '''
             if args.verbose:
                 len_now = len(finished[0][0].split(' '))-1
