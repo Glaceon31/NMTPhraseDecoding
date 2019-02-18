@@ -54,13 +54,17 @@ def splitline(line, args):
     result = line.split()
     pos = 0
     while pos < len(result):
-        if result[pos][0] == '<' and result[pos][-1] != '>':
+        if result[pos][0] == '<' and result[pos][-1] == '>':
+            del result[pos]
+        elif result[pos][0] == '<' and result[pos][-1] != '>':
             if pos+1 < len(result):
                 result[pos] += ''+result[pos+1]
                 del result[pos+1]
             else:
                 print('wrong!! ', result[pos])
                 exit()
+            if result[pos][0] == '<' and result[pos][-1] == '>':
+                del result[pos]
         else:
             pos += 1
     return result
@@ -94,6 +98,6 @@ if __name__ == "__main__":
     middle_ref.close()
     os.system("perl "+args.bleu+" -lc tmp.ref < tmp.hypo > " +args.output)
 
-    os.system("rm tmp.hypo")
-    os.system("rm tmp.ref")
+    #os.system("rm tmp.hypo")
+    #os.system("rm tmp.ref")
 
