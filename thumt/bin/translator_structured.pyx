@@ -148,6 +148,7 @@ cdef automatons automatons_build_structured(words_src, punc, pairpunc, params):
     result.states[0].pos_end = -1
     result.states[0].outer = -1
     result.states[0].num_inner = 0
+    level_pairpunc = 0
     while pos < length:
         if is_start_tag(words_src[pos]):
             tags.append(['',''])
@@ -174,6 +175,7 @@ cdef automatons automatons_build_structured(words_src, punc, pairpunc, params):
             current_state = result.states[current_state].outer
             pos += 1
         elif params.pairpunc_constraint and words_src[pos] in pairpunc_start:
+            level_pairpunc += 1
             tags.append(['',''])
             tags.append(['',''])
             result.states[current_state].inner[result.states[current_state].num_inner] = result.state_num
@@ -197,7 +199,8 @@ cdef automatons automatons_build_structured(words_src, punc, pairpunc, params):
             current_state = result.state_num
             result.state_num += 1
             ranges.append([])
-        elif params.pairpunc_constraint and words_src[pos] in pairpunc_end:
+        elif params.pairpunc_constraint and level_pairpunc > 0 and words_src[pos] in pairpunc_end:
+            level_pairpunc -= 1
             result.states[current_state].pos_end = pos_result
             result.states[current_state].visible = <int *> malloc(len(ranges[current_state])*sizeof(int))
             for j in range(len(ranges[current_state])):
@@ -214,7 +217,6 @@ cdef automatons automatons_build_structured(words_src, punc, pairpunc, params):
             current_state = result.states[current_state].outer
             pos_result += 1
             pos += 1
-            
         elif not is_tag(words_src[pos]):
             words_result.append(words_src[pos])
             ranges[current_state].append(pos_result)
@@ -278,6 +280,7 @@ def automatons_build_structured_other(words_src, punc, pairpunc, params):
     result.states[0].pos_end = -1
     result.states[0].outer = -1
     result.states[0].num_inner = 0
+    level_pairpunc = 0
     while pos < length:
         if is_start_tag(words_src[pos]):
             tags.append(['',''])
@@ -304,6 +307,7 @@ def automatons_build_structured_other(words_src, punc, pairpunc, params):
             current_state = result.states[current_state].outer
             pos += 1
         elif params.pairpunc_constraint and words_src[pos] in pairpunc_start:
+            level_pairpunc += 1
             tags.append(['',''])
             tags.append(['',''])
             result.states[current_state].inner[result.states[current_state].num_inner] = result.state_num
@@ -327,7 +331,8 @@ def automatons_build_structured_other(words_src, punc, pairpunc, params):
             current_state = result.state_num
             result.state_num += 1
             ranges.append([])
-        elif params.pairpunc_constraint and words_src[pos] in pairpunc_end:
+        elif params.pairpunc_constraint and level_pairpunc > 0 and words_src[pos] in pairpunc_end:
+            level_pairpunc -= 1
             result.states[current_state].pos_end = pos_result
             result.states[current_state].visible = <int *> malloc(len(ranges[current_state])*sizeof(int))
             for j in range(len(ranges[current_state])):
@@ -662,6 +667,7 @@ def default_parameters():
         merge_status="max_align",
         keep_status_num=1,
         src2null_loss=1,
+        allow_src2null=1,
         filter_src2null_loss=1,
         src2null_lambda=1.0,
         null2trg_prob=1.0,
@@ -2084,57 +2090,58 @@ cpdef main(args):
                             print_stack(stacks[length][num_cov], len_src, stacks_count[length][num_cov])
                             printf('limited: %d\n', stacks_limit_count[length][num_cov])
                             #print_stack(stacks_limit[length][num_cov])
-                        for i in range(stacks_count[length][num_cov]):
-                            element = stacks[length][num_cov][i]
-                            autostate = autom.states[element.automatons]
-                            if can_addstack(stacks[length][num_cov+1], stacks_count[length][num_cov+1], element.loss, params_c.beam_size) == 0:
-                                continue
-                            if element.limited == 1:
-                                continue
-                            #time_0s = time.time()
-                            # not optimized
-                            kmax, kstates = get_kmax(null_order, element.coverage, params_c.beam_size, autom, element.automatons, golden=golden)
-                            assert len(kmax) == len(kstates)
-                            for j in range(len(kmax)):
-                                nullpos = kmax[j]
-                                newstate = kstates[j]
-                                #count_test[0] += 1
-                                
-                                #assert element.coverage[nullpos] == 0
-                                if params_c.src2null_loss:
-                                    total_src2null_loss = element.src2null_loss+my_log(probs_null[nullpos])
-                                    if params.filter_src2null_loss == 1 and total_src2null_loss < -1*length:
-                                        continue
-                                    new_loss = element.loss+src2null_lambda*my_log(probs_null[nullpos])
-                                else:
-                                    new_loss = element.loss
-                                    total_src2null_loss = 0
-                                new_align_loss = element.align_loss+my_log(probs_null[nullpos])
-                                if can_addstack(stacks[length][num_cov+1], stacks_count[length][num_cov+1], new_loss, params_c.beam_size, align_loss=new_align_loss) == 0:
+                        if params.allow_src2null:
+                            for i in range(stacks_count[length][num_cov]):
+                                element = stacks[length][num_cov][i]
+                                autostate = autom.states[element.automatons]
+                                if can_addstack(stacks[length][num_cov+1], stacks_count[length][num_cov+1], element.loss, params_c.beam_size) == 0:
                                     continue
-                                #count_test[1] += 1
-                                #time_1s = time.time()
-                                newelement = copy_translation_status(element, len_src)
-                                newelement.coverage[nullpos] = 1
-                                newelement.align_loss = new_align_loss
-                                newelement.automatons = newstate
-                                newelement.middle_state = newstate
-                                tns = to_next_state(autom, newelement.automatons, newelement.coverage)
-                                if tns != -1:
-                                    newelement.automatons = tns
-                                #if can_go_next(autostate, newelement.coverage) == 1 and autostate.next_state != -1:
-                                #    newelement.automatons = autostate.next_state
+                                if element.limited == 1:
+                                    continue
+                                #time_0s = time.time()
+                                # not optimized
+                                kmax, kstates = get_kmax(null_order, element.coverage, params_c.beam_size, autom, element.automatons, golden=golden)
+                                assert len(kmax) == len(kstates)
+                                for j in range(len(kmax)):
+                                    nullpos = kmax[j]
+                                    newstate = kstates[j]
+                                    #count_test[0] += 1
+                                    
+                                    #assert element.coverage[nullpos] == 0
+                                    if params_c.src2null_loss:
+                                        total_src2null_loss = element.src2null_loss+my_log(probs_null[nullpos])
+                                        if params.filter_src2null_loss == 1 and total_src2null_loss < -1*length:
+                                            continue
+                                        new_loss = element.loss+src2null_lambda*my_log(probs_null[nullpos])
+                                    else:
+                                        new_loss = element.loss
+                                        total_src2null_loss = 0
+                                    new_align_loss = element.align_loss+my_log(probs_null[nullpos])
+                                    if can_addstack(stacks[length][num_cov+1], stacks_count[length][num_cov+1], new_loss, params_c.beam_size, align_loss=new_align_loss) == 0:
+                                        continue
+                                    #count_test[1] += 1
+                                    #time_1s = time.time()
+                                    newelement = copy_translation_status(element, len_src)
+                                    newelement.coverage[nullpos] = 1
+                                    newelement.align_loss = new_align_loss
+                                    newelement.automatons = newstate
+                                    newelement.middle_state = newstate
+                                    tns = to_next_state(autom, newelement.automatons, newelement.coverage)
+                                    if tns != -1:
+                                        newelement.automatons = tns
+                                    #if can_go_next(autostate, newelement.coverage) == 1 and autostate.next_state != -1:
+                                    #    newelement.automatons = autostate.next_state
 
-                                newelement.previous = [length, num_cov, i]
-                                newelement.loss = new_loss
-                                newelement.src2null_loss = total_src2null_loss
-                                #printf('%d/%d add to %d/%d\n', length, num_cov, length, num_cov+1)
-                                stacks_count[length][num_cov+1] = add_stack(stacks[length][num_cov+1], stacks_count[length][num_cov+1], newelement, len_src, beam_size)
-                                #time_1e = time.time()
-                                #time_test[1] += time_1e-time_1s
-                                break
-                            #time_0e = time.time()
-                            #time_test[0] += time_0e-time_0s
+                                    newelement.previous = [length, num_cov, i]
+                                    newelement.loss = new_loss
+                                    newelement.src2null_loss = total_src2null_loss
+                                    #printf('%d/%d add to %d/%d\n', length, num_cov, length, num_cov+1)
+                                    stacks_count[length][num_cov+1] = add_stack(stacks[length][num_cov+1], stacks_count[length][num_cov+1], newelement, len_src, beam_size)
+                                    #time_1e = time.time()
+                                    #time_test[1] += time_1e-time_1s
+                                    break
+                                #time_0e = time.time()
+                                #time_test[0] += time_0e-time_0s
                     time_null_end = time.time()
                     time_null += time_null_end-time_null_start
 
