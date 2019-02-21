@@ -21,6 +21,7 @@ def parseargs():
     parser.add_argument("--names", type=str, required=True, nargs="+")
     parser.add_argument("--refs", type=str, required=True, nargs="+")
     parser.add_argument("--senid", type=int, default=-1)
+    parser.add_argument("--hidden", action="store_true")
     return parser.parse_args()
 
 def rbpe(inp):
@@ -77,13 +78,21 @@ if __name__ == "__main__":
         hypotmp = [' '.join(splitline(t[i])) for t in lhypos] 
         bleus = [0]*len(lhypos)
         bleus_verbose = ['']*len(lhypos)
+        for j in range(len(lhypos)):
+            bleus[j] = bleu(rbpe(hypotmp[j]), reftmp, 4, verbose=False)
+            bleus_verbose[j] = bleu(rbpe(hypotmp[j]), reftmp, 4, verbose=True)
+        if args.hidden:
+            equal = True
+            b = bleus[0]
+            if j in range(1, len(lhypos)):
+                if b != bleus[j]:
+                    equal = False
+            if equal:
+                continue
         print('=== sentence #%d ===' %i)
         print('src:', lsrc[i])
         for r in range(len(reftmp)):
             print('ref'+str(r)+':', reftmp[r])
-        for j in range(len(lhypos)):
-            bleus[j] = bleu(rbpe(hypotmp[j]), reftmp, 4, verbose=False)
-            bleus_verbose[j] = bleu(rbpe(hypotmp[j]), reftmp, 4, verbose=True)
         results = sorted(zip(args.names, hypotmp, bleus, bleus_verbose), key=lambda x:x[2])
         for j in range(len(lhypos)):
             result = results[j]

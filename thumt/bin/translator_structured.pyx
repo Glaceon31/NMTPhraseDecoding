@@ -66,13 +66,23 @@ def is_end_tag(word):
     return False
 
 
-puncfile = '/data/zjctmp/ACL2019/external/puncs'
+#puncfile = '/data/zjctmp/ACL2019/external/puncs'
 def load_punc(puncfile):
     content = open(puncfile, 'r').read()
     result = content.split('\n')
     if result[-1] == '':
         del result[-1]
     result = [i.decode('utf-8') for i in result]
+    return result
+
+
+def load_pairpunc(puncfile):
+    content = open(puncfile, 'r').read()
+    result = content.split('\n')
+    if result[-1] == '':
+        del result[-1]
+    result = [i.decode('utf-8') for i in result]
+    result = [i.split(' ') for i in result]
     return result
 
 
@@ -118,89 +128,13 @@ cdef int find_automatons_state(automatons autom, int srcpos):
                 return i
 
 
-cdef automatons automatons_build_structured(words_src, punc, params):
+cdef automatons automatons_build_structured(words_src, punc, pairpunc, params):
     cdef automatons result
     cdef int length = len(words_src)
     cdef int pos, start, i, j
-    starttags = [-1]
-    ranges = [[]]
-    words_result = []
-    current_state = 0
-    result.state_num = 1
-    pos = 0
-    pos_result = 0
-    result.states[0].next_state = -1
-    result.states[0].pos_start = -1
-    result.states[0].pos_end = -1
-    result.states[0].outer = -1
-    result.states[0].num_inner = 0
-    while pos < length:
-        if not is_tag(words_src[pos]):
-            words_result.append(words_src[pos])
-            ranges[current_state].append(pos_result)
-            if params.punc_border and words_src[pos] in punc:
-                result.states[current_state].next_state = result.state_num
-                result.states[result.state_num].outer = result.states[current_state].outer
-                result.states[result.state_num].pos_end = result.states[current_state].pos_end
-                #result.states[result.state_num].end_tag = result.states[current_state].end_tag
-                #result.states[current_state].outer = -1
-                result.states[current_state].pos_end = -1
-                result.states[current_state].visible = <int *> malloc(len(ranges[current_state])*sizeof(int))
-                for j in range(len(ranges[current_state])):
-                    result.states[current_state].visible[j] = ranges[current_state][j]
-                result.states[current_state].num_visible = len(ranges[current_state]) 
-                result.states[result.state_num].num_inner = 0
-                result.states[result.state_num].pos_start = -1
-                result.states[result.state_num].next_state = -1 
-                current_state = result.state_num
-                result.state_num += 1
-                ranges.append([])
-            pos_result += 1
-            pos += 1
-        elif is_start_tag(words_src[pos]):
-            result.states[current_state].inner[result.states[current_state].num_inner] = result.state_num
-            result.states[current_state].num_inner += 1
-            result.states[result.state_num].num_inner = 0
-            result.states[result.state_num].outer = current_state
-            result.states[result.state_num].next_state = -1 
-            #result.states[result.state_num].start_tag = repr(words_src[pos])
-            result.states[result.state_num].pos_start = pos_result 
-            current_state = result.state_num
-            result.state_num += 1
-            ranges.append([])
-            pos += 1
-        elif is_end_tag(words_src[pos]):
-            #result.states[current_state].end_tag = repr(words_src[pos])
-            result.states[current_state].pos_end = pos_result
-            result.states[current_state].visible = <int *> malloc(len(ranges[current_state])*sizeof(int))
-            for j in range(len(ranges[current_state])):
-                result.states[current_state].visible[j] = ranges[current_state][j]
-            result.states[current_state].num_visible = len(ranges[current_state]) 
-            current_state = result.states[current_state].outer
-            pos += 1
-        else:
-            pos += 1
-    result.states[current_state].visible = <int *> malloc(len(ranges[current_state])*sizeof(int))
-    for j in range(len(ranges[current_state])):
-        result.states[current_state].visible[j] = ranges[current_state][j]
-    result.states[current_state].num_visible = len(ranges[current_state])
-
-    for i in range(result.state_num):
-        all_visible, all_visible_state = get_all_visible(result, i)
-        all_visible_sorted = sorted(zip(all_visible, all_visible_state), key=lambda x:x[0], reverse=False)
-        result.states[i].num_all_visible = len(all_visible)
-        result.states[i].all_visible = <int *> malloc(result.states[i].num_all_visible*sizeof(int))
-        result.states[i].all_visible_state = <int *> malloc(result.states[i].num_all_visible*sizeof(int))
-        for j in range(result.states[i].num_all_visible):
-            result.states[i].all_visible[j] = all_visible_sorted[j][0]
-            result.states[i].all_visible_state[j] = all_visible_sorted[j][1]
-    return result
-
-
-def automatons_build_structured_other(words_src, punc, params):
-    cdef automatons result
-    cdef int length = len(words_src)
-    cdef int pos, start, i, j
+    if params.pairpunc_constraint:
+        pairpunc_start = [t[0] for t in pairpunc]
+        pairpunc_end = [t[1] for t in pairpunc]
     starttags = [-1]
     ranges = [[]]
     tags = [['','']]
@@ -215,31 +149,7 @@ def automatons_build_structured_other(words_src, punc, params):
     result.states[0].outer = -1
     result.states[0].num_inner = 0
     while pos < length:
-        if not is_tag(words_src[pos]):
-            words_result.append(words_src[pos])
-            ranges[current_state].append(pos_result)
-            if params.punc_border and words_src[pos] in punc:
-                tags.append(['',''])
-                result.states[current_state].next_state = result.state_num
-                result.states[result.state_num].outer = result.states[current_state].outer
-                result.states[result.state_num].pos_end = result.states[current_state].pos_end
-                #result.states[result.state_num].end_tag = result.states[current_state].end_tag
-                tags[result.state_num][1] = tags[current_state][1]
-                result.states[current_state].outer = -1
-                result.states[current_state].pos_end = -1
-                result.states[current_state].visible = <int *> malloc(len(ranges[current_state])*sizeof(int))
-                for j in range(len(ranges[current_state])):
-                    result.states[current_state].visible[j] = ranges[current_state][j]
-                result.states[current_state].num_visible = len(ranges[current_state]) 
-                result.states[result.state_num].num_inner = 0
-                result.states[result.state_num].pos_start = -1
-                result.states[result.state_num].next_state = -1 
-                current_state = result.state_num
-                result.state_num += 1
-                ranges.append([])
-            pos_result += 1
-            pos += 1
-        elif is_start_tag(words_src[pos]):
+        if is_start_tag(words_src[pos]):
             tags.append(['',''])
             result.states[current_state].inner[result.states[current_state].num_inner] = result.state_num
             result.states[current_state].num_inner += 1
@@ -263,8 +173,218 @@ def automatons_build_structured_other(words_src, punc, params):
             result.states[current_state].num_visible = len(ranges[current_state]) 
             current_state = result.states[current_state].outer
             pos += 1
+        elif params.pairpunc_constraint and words_src[pos] in pairpunc_start:
+            tags.append(['',''])
+            tags.append(['',''])
+            result.states[current_state].inner[result.states[current_state].num_inner] = result.state_num
+            result.states[current_state].num_inner += 1
+            result.states[result.state_num].num_inner = 1
+            result.states[result.state_num].inner[0] = result.state_num+1
+            result.states[result.state_num].outer = current_state
+            result.states[result.state_num].next_state = -1 
+            #result.states[result.state_num].start_tag = repr(words_src[pos])
+            result.states[result.state_num].pos_start = pos_result 
+            current_state = result.state_num
+            result.state_num += 1
+            ranges.append([pos_result])
+            words_result.append(words_src[pos])
+            pos_result += 1
+            pos += 1
+
+            result.states[result.state_num].num_inner = 0
+            result.states[result.state_num].outer = current_state
+            result.states[result.state_num].next_state = -1 
+            current_state = result.state_num
+            result.state_num += 1
+            ranges.append([])
+        elif params.pairpunc_constraint and words_src[pos] in pairpunc_end:
+            result.states[current_state].pos_end = pos_result
+            result.states[current_state].visible = <int *> malloc(len(ranges[current_state])*sizeof(int))
+            for j in range(len(ranges[current_state])):
+                result.states[current_state].visible[j] = ranges[current_state][j]
+            result.states[current_state].num_visible = len(ranges[current_state]) 
+            current_state = result.states[current_state].outer
+            words_result.append(words_src[pos])
+
+            ranges[current_state].append(pos_result)
+            result.states[current_state].visible = <int *> malloc(len(ranges[current_state])*sizeof(int))
+            for j in range(len(ranges[current_state])):
+                result.states[current_state].visible[j] = ranges[current_state][j]
+            result.states[current_state].num_visible = len(ranges[current_state]) 
+            current_state = result.states[current_state].outer
+            pos_result += 1
+            pos += 1
+            
+        elif not is_tag(words_src[pos]):
+            words_result.append(words_src[pos])
+            ranges[current_state].append(pos_result)
+            if params.punc_border and words_src[pos] in punc:
+                tags.append(['',''])
+                result.states[current_state].next_state = result.state_num
+                result.states[result.state_num].outer = result.states[current_state].outer
+                result.states[result.state_num].pos_end = result.states[current_state].pos_end
+                tags[result.state_num][1] = tags[current_state][1]
+                #result.states[result.state_num].end_tag = result.states[current_state].end_tag
+                #result.states[current_state].outer = -1
+                result.states[current_state].pos_end = -1
+                result.states[current_state].visible = <int *> malloc(len(ranges[current_state])*sizeof(int))
+                for j in range(len(ranges[current_state])):
+                    result.states[current_state].visible[j] = ranges[current_state][j]
+                result.states[current_state].num_visible = len(ranges[current_state]) 
+                result.states[result.state_num].num_inner = 0
+                result.states[result.state_num].pos_start = -1
+                result.states[result.state_num].next_state = -1 
+                current_state = result.state_num
+                result.state_num += 1
+                ranges.append([])
+            pos_result += 1
+            pos += 1
         else:
             pos += 1
+    result.states[current_state].visible = <int *> malloc(len(ranges[current_state])*sizeof(int))
+    for j in range(len(ranges[current_state])):
+        result.states[current_state].visible[j] = ranges[current_state][j]
+    result.states[current_state].num_visible = len(ranges[current_state])
+
+    for i in range(result.state_num):
+        all_visible, all_visible_state = get_all_visible(result, i)
+        all_visible_sorted = sorted(zip(all_visible, all_visible_state), key=lambda x:x[0], reverse=False)
+        result.states[i].num_all_visible = len(all_visible)
+        result.states[i].all_visible = <int *> malloc(result.states[i].num_all_visible*sizeof(int))
+        result.states[i].all_visible_state = <int *> malloc(result.states[i].num_all_visible*sizeof(int))
+        for j in range(result.states[i].num_all_visible):
+            result.states[i].all_visible[j] = all_visible_sorted[j][0]
+            result.states[i].all_visible_state[j] = all_visible_sorted[j][1]
+    return result
+
+
+def automatons_build_structured_other(words_src, punc, pairpunc, params):
+    cdef automatons result
+    cdef int length = len(words_src)
+    cdef int pos, start, i, j
+    if params.pairpunc_constraint:
+        pairpunc_start = [t[0] for t in pairpunc]
+        pairpunc_end = [t[1] for t in pairpunc]
+    starttags = [-1]
+    ranges = [[]]
+    tags = [['','']]
+    words_result = []
+    current_state = 0
+    result.state_num = 1
+    pos = 0
+    pos_result = 0
+    result.states[0].next_state = -1
+    result.states[0].pos_start = -1
+    result.states[0].pos_end = -1
+    result.states[0].outer = -1
+    result.states[0].num_inner = 0
+    while pos < length:
+        if is_start_tag(words_src[pos]):
+            tags.append(['',''])
+            result.states[current_state].inner[result.states[current_state].num_inner] = result.state_num
+            result.states[current_state].num_inner += 1
+            result.states[result.state_num].num_inner = 0
+            result.states[result.state_num].outer = current_state
+            result.states[result.state_num].next_state = -1 
+            #result.states[result.state_num].start_tag = repr(words_src[pos])
+            tags[result.state_num][0] = words_src[pos]
+            result.states[result.state_num].pos_start = pos_result 
+            current_state = result.state_num
+            result.state_num += 1
+            ranges.append([])
+            pos += 1
+        elif is_end_tag(words_src[pos]):
+            #result.states[current_state].end_tag = repr(words_src[pos])
+            tags[current_state][1] = words_src[pos]
+            result.states[current_state].pos_end = pos_result
+            result.states[current_state].visible = <int *> malloc(len(ranges[current_state])*sizeof(int))
+            for j in range(len(ranges[current_state])):
+                result.states[current_state].visible[j] = ranges[current_state][j]
+            result.states[current_state].num_visible = len(ranges[current_state]) 
+            current_state = result.states[current_state].outer
+            pos += 1
+        elif params.pairpunc_constraint and words_src[pos] in pairpunc_start:
+            tags.append(['',''])
+            tags.append(['',''])
+            result.states[current_state].inner[result.states[current_state].num_inner] = result.state_num
+            result.states[current_state].num_inner += 1
+            result.states[result.state_num].num_inner = 1
+            result.states[result.state_num].inner[0] = result.state_num+1
+            result.states[result.state_num].outer = current_state
+            result.states[result.state_num].next_state = -1 
+            #result.states[result.state_num].start_tag = repr(words_src[pos])
+            result.states[result.state_num].pos_start = pos_result 
+            current_state = result.state_num
+            result.state_num += 1
+            ranges.append([pos_result])
+            words_result.append(words_src[pos])
+            pos_result += 1
+            pos += 1
+
+            result.states[result.state_num].num_inner = 0
+            result.states[result.state_num].outer = current_state
+            result.states[result.state_num].next_state = -1 
+            current_state = result.state_num
+            result.state_num += 1
+            ranges.append([])
+        elif params.pairpunc_constraint and words_src[pos] in pairpunc_end:
+            result.states[current_state].pos_end = pos_result
+            result.states[current_state].visible = <int *> malloc(len(ranges[current_state])*sizeof(int))
+            for j in range(len(ranges[current_state])):
+                result.states[current_state].visible[j] = ranges[current_state][j]
+            result.states[current_state].num_visible = len(ranges[current_state]) 
+            current_state = result.states[current_state].outer
+            words_result.append(words_src[pos])
+
+            ranges[current_state].append(pos_result)
+            result.states[current_state].visible = <int *> malloc(len(ranges[current_state])*sizeof(int))
+            for j in range(len(ranges[current_state])):
+                result.states[current_state].visible[j] = ranges[current_state][j]
+            result.states[current_state].num_visible = len(ranges[current_state]) 
+            current_state = result.states[current_state].outer
+            pos_result += 1
+            pos += 1
+            
+        elif not is_tag(words_src[pos]):
+            words_result.append(words_src[pos])
+            ranges[current_state].append(pos_result)
+            if params.punc_border and words_src[pos] in punc:
+                tags.append(['',''])
+                result.states[current_state].next_state = result.state_num
+                result.states[result.state_num].outer = result.states[current_state].outer
+                result.states[result.state_num].pos_end = result.states[current_state].pos_end
+                tags[result.state_num][1] = tags[current_state][1]
+                #result.states[result.state_num].end_tag = result.states[current_state].end_tag
+                #result.states[current_state].outer = -1
+                result.states[current_state].pos_end = -1
+                result.states[current_state].visible = <int *> malloc(len(ranges[current_state])*sizeof(int))
+                for j in range(len(ranges[current_state])):
+                    result.states[current_state].visible[j] = ranges[current_state][j]
+                result.states[current_state].num_visible = len(ranges[current_state]) 
+                result.states[result.state_num].num_inner = 0
+                result.states[result.state_num].pos_start = -1
+                result.states[result.state_num].next_state = -1 
+                current_state = result.state_num
+                result.state_num += 1
+                ranges.append([])
+            pos_result += 1
+            pos += 1
+        else:
+            pos += 1
+    result.states[current_state].visible = <int *> malloc(len(ranges[current_state])*sizeof(int))
+    for j in range(len(ranges[current_state])):
+        result.states[current_state].visible[j] = ranges[current_state][j]
+    result.states[current_state].num_visible = len(ranges[current_state])
+
+    for i in range(result.state_num):
+        all_visible, all_visible_state = get_all_visible(result, i)
+        all_visible_sorted = sorted(zip(all_visible, all_visible_state), key=lambda x:x[0], reverse=False)
+        result.states[i].num_all_visible = len(all_visible)
+        result.states[i].all_visible = <int *> malloc(result.states[i].num_all_visible*sizeof(int))
+        result.states[i].all_visible_state = <int *> malloc(result.states[i].num_all_visible*sizeof(int))
+        for j in range(result.states[i].num_all_visible):
+            result.states[i].all_visible[j] = all_visible_sorted[j][0]
+            result.states[i].all_visible_state[j] = all_visible_sorted[j][1]
     return words_result, tags
 
 
@@ -485,6 +605,8 @@ def parse_args():
                         help="probability for source word to null")
     parser.add_argument("--puncfile", type=str,
                         help="list of punctuations")
+    parser.add_argument("--pairpuncfile", type=str,
+                        help="list of paired punctuations")
     parser.add_argument("--neuralsrc2null", type=str,
                         help="model for neural source word to null")
     parser.add_argument("--model_s2n", type=str,
@@ -547,6 +669,7 @@ def default_parameters():
         allow_src2stop=1,
         use_golden=1,
         punc_border=0,
+        pairpunc_constraint=0,
         cut_ending=0,
         cut_threshold=4.
     )
@@ -1681,6 +1804,10 @@ cpdef main(args):
         if params.punc_border:
             punc = load_punc(args.puncfile)
             print('puncs:', punc)
+        pairpunc = None
+        if params.pairpunc_constraint:
+            pairpunc = load_pairpunc(args.pairpuncfile)
+            print('paired puncs:', pairpunc)
 
         # Load ivocab
         ivocab_src = build_ivocab(params.vocabulary["source"])
@@ -1807,8 +1934,8 @@ cpdef main(args):
                 words = splitline(src)
                 #print('words:', words)
                 # build automatons
-                autom = automatons_build_structured(words, punc, params)
-                words, tags = automatons_build_structured_other(words, punc, params)
+                autom = automatons_build_structured(words, punc, pairpunc, params)
+                words, tags = automatons_build_structured_other(words, punc, pairpunc, params)
                 #print('words_notag:', words)
                 # words = ***(words)
                 print_autom(autom)
