@@ -32,6 +32,9 @@ def splitline(line):
             pos += 1
     return result
 
+def reverse_bpe(inp):
+    return inp.replace('@@ ', '')
+
 def isstarttag(word):
     if word[0] == '<' and word[1] != '/' and word[-1] == '>':
         return True
@@ -83,10 +86,16 @@ if __name__ == "__main__":
             if isstarttag(words[pos]):
                 tagname = gettagname(words[pos])
                 pos_end = -1
+                level = 0
                 for tmp in range(pos+1, len(words)):
+                    if isstarttag(words[tmp]):
+                        level += 1
                     if isendtag(words[tmp], tagname):
-                        pos_end = tmp
-                        break
+                        if level > 0:
+                            level -= 1
+                        else:
+                            pos_end = tmp
+                            break
                 if pos_end != -1:
                     middle.write(re.sub('<.*?>', '', ' '.join(words[pos+1:tmp])).strip()+'\n')
                     newtag = [words[pos], words[tmp], ' '.join(words[pos+1:tmp]), linenum]
@@ -104,6 +113,7 @@ if __name__ == "__main__":
 
     middle_out = open('tmpprocess.out', 'r')
     lines_processed = middle_out.read().split('\n')
+    lines_processed = [reverse_bpe(l) for l in lines_processed]
     output = open(args.output, 'w')
     for i in range(len(lines)):
         sentences_i = sentences[i]

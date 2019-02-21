@@ -17,11 +17,8 @@ def parseargs():
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--src", type=str, required=True)
-    parser.add_argument("--hypo", type=str, required=True)
-    parser.add_argument("--baseline", type=str, required=True)
-    parser.add_argument("--compare", type=str)
-    parser.add_argument("--hidden", action="store_true")
-    #parser.add_argument("--oracle", type=str, required=True)
+    parser.add_argument("--hypos", type=str, required=True, nargs="+")
+    parser.add_argument("--names", type=str, required=True, nargs="+")
     parser.add_argument("--refs", type=str, required=True, nargs="+")
     parser.add_argument("--senid", type=int, default=-1)
     return parser.parse_args()
@@ -55,22 +52,12 @@ if __name__ == "__main__":
     args = parseargs()
 
     src = open(args.src, 'r').read() 
-    hypo = open(args.hypo, 'r').read() 
-    if args.compare:
-        compare = open(args.compare, 'r').read()
-    #oracle = open(args.oracle, 'r').read() 
-    baseline = open(args.baseline, 'r').read()
+    hypos = [open(hypo, 'r').read() for hypo in args.hypos]
     refs = [open(ref, 'r').read() for ref in args.refs]
 
     if args.senid == -1:
         lsrc = getlines(src)
-        lhypo = getlines(hypo)
-        lhypo = [' '.join(splitline(i)) for i in lhypo]
-        #loracle = getlines(oracle)
-        if args.compare:
-            lcompare = getlines(compare)
-            lcompare = [' '.join(splitline(i)) for i in lcompare]
-        lbase = getlines(baseline)
+        lhypos = [getlines(h) for h in hypos]
         lrefs = [getlines(r) for r in refs]
     else:
         lsrc = [getlines(src)[args.senid]]
@@ -87,24 +74,22 @@ if __name__ == "__main__":
     better = 0
     for i in range(len(lsrc)):
         reftmp = [' '.join(splitline(t[i])) for t in lrefs]
-        if args.hidden and args.compare and lhypo[i] == lcompare[i]:
-            continue
-        print('=== %d ===' %i)
+        hypotmp = [' '.join(splitline(t[i])) for t in lhypos] 
+        bleus = [0]*len(lhypos)
+        bleus_verbose = ['']*len(lhypos)
+        print('=== sentence #%d ===' %i)
         print('src:', lsrc[i])
-        print('ours:', lhypo[i], '('+str(bleu(rbpe(lhypo[i]), reftmp, 4, verbose=True))+')')
-        print('baseline:', lbase[i], '('+str(bleu(rbpe(lbase[i]), reftmp, 4, verbose=True))+')')
-        if args.compare:
-            print('compare:', lcompare[i], '('+str(bleu(rbpe(lcompare[i]), reftmp, 4, verbose=True))+')')
-        #print('oracle:', loracle[i], '('+str(bleu(rbpe(loracle[i]), reftmp, 4, verbose=True))+')')
-        if bleu(rbpe(lhypo[i]), reftmp, 4, verbose=True) > bleu(rbpe(lcompare[i]), reftmp, 4, verbose=True):
-            better += 1
-        elif bleu(rbpe(lhypo[i]), reftmp, 4, verbose=True) < bleu(rbpe(lcompare[i]), reftmp, 4, verbose=True):
-            worse += 1
         for r in range(len(reftmp)):
             print('ref'+str(r)+':', reftmp[r])
+        for j in range(len(lhypos)):
+            bleus[j] = bleu(rbpe(hypotmp[j]), reftmp, 4, verbose=False)
+            bleus_verbose[j] = bleu(rbpe(hypotmp[j]), reftmp, 4, verbose=True)
+        results = sorted(zip(args.names, hypotmp, bleus, bleus_verbose), key=lambda x:x[2])
+        for j in range(len(lhypos)):
+            result = results[j]
+            print('(#'+str(len(lhypos)-j)+')', result[0]+':', result[1], '('+result[3]+')')
+        #print('ours:', lhypo[i], '('+str(bleu(rbpe(lhypo[i]), reftmp, 4, verbose=True))+')')
         print('\n')
-        #if i == 100:
+        #if i == 1:
         #    break
-    print('better:', better)
-    print('worse:', worse)
 

@@ -5,11 +5,14 @@ from __future__ import print_function
 import argparse
 import operator
 import os
+import re
 
 import numpy 
 import time
 import math
 import json
+
+from calculate_oracle import bleu
 
 
 def parseargs():
@@ -54,18 +57,13 @@ def splitline(line, args):
     result = line.split()
     pos = 0
     while pos < len(result):
-        result[pos] = result[pos].strip()
-        if result[pos][0] == '<' and result[pos][-1] == '>':
-            del result[pos]
-        elif result[pos][0] == '<' and result[pos][-1] != '>':
+        if result[pos][0] == '<' and result[pos][-1] != '>':
             if pos+1 < len(result):
                 result[pos] += ''+result[pos+1]
                 del result[pos+1]
             else:
                 print('wrong!! ', result[pos])
                 exit()
-            if result[pos][0] == '<' and result[pos][-1] == '>':
-                del result[pos]
         else:
             pos += 1
     return result
@@ -92,8 +90,55 @@ if __name__ == "__main__":
         line_ref = lines_ref[i]
         words_hypo = splitline(line_hypo, args)
         words_ref = splitline(line_ref, args)
-        middle_hypo.write(' '.join(words_hypo)+'\n')
-        middle_ref.write(' '.join(words_ref)+'\n')
+        ref_segs = []
+        ref_tags = []
+        for pos in range(len(words_ref)):
+            if is_start_tag(words_ref[pos]):
+                pos_end = -1
+                level = 0
+                tagname = get_tag_name(words_ref[pos])
+                for tmp in range(pos+1, len(words_ref)):
+                    if is_start_tag(words_ref[tmp]):
+                        level += 1
+                    if is_end_tag(words_ref[tmp]):
+                        if level > 0:
+                            level -= 1
+                        else:
+                            pos_end = tmp
+                            break
+                if pos_end != 1:
+                    ref_segs.append(re.sub('<.*?>', '', ' '.join(words_ref[pos+1:tmp])).strip())
+                    ref_tags.append(tagname)
+        hypo_segs = ['']*len(ref_segs)
+        for pos in range(len(words_hypo)):
+            if is_start_tag(words_hypo[pos]):
+                pos_end = -1
+                level = 0
+                tagname = get_tag_name(words_hypo[pos])
+                for tmp in range(pos+1, len(words_hypo)):
+                    if is_start_tag(words_hypo[tmp]):
+                        level += 1
+                    if is_end_tag(words_hypo[tmp]):
+                        if level > 0:
+                            level -= 1
+                        else:
+                            pos_end = tmp
+                            break
+                hypo_seg = re.sub('<.*?>', '', ' '.join(words_hypo[pos+1:tmp])).strip()
+                maxbleu = 0.
+                maxj = -1
+                for j in range(len(ref_segs)):
+                    if hypo_segs[j] == '' and tagname == ref_tags[j]:
+                        tmpbleu = bleu(hypo_seg, [ref_segs[j]], 4)
+                        if tmpbleu > maxbleu:
+                            maxbleu = tmpbleu
+                            maxj = j
+                if maxj != -1:
+                    hypo_segs[maxj] = hypo_seg
+                    
+        if len(ref_segs) > 0:
+            middle_hypo.write('\n'.join(hypo_segs)+'\n')
+            middle_ref.write('\n'.join(ref_segs)+'\n')
 
     middle_hypo.close()
     middle_ref.close()
