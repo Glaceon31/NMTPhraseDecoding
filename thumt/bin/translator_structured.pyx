@@ -673,8 +673,10 @@ def default_parameters():
         null2trg_prob=1.0,
         split_limited=0,
         allow_src2stop=1,
+        allow_null2stop=1,
         use_golden=1,
         punc_border=0,
+        phrase_len=4,
         pairpunc_constraint=0,
         cut_ending=0,
         cut_threshold=4.
@@ -2348,7 +2350,7 @@ cpdef main(args):
                                                 if pos_end+1 == autom.states[nextstate].visible[k]:
                                                     is_visible = 1 
                                                     break
-                                            while is_visible == 1 and element.coverage[pos_end+1] == 0 and pos_end-pos < 3 and pos_end < len_src-1: #and words[pos_end].endswith('@@'):
+                                            while is_visible == 1 and element.coverage[pos_end+1] == 0 and pos_end-pos < params.phrase_len-1 and pos_end < len_src-1: #and words[pos_end].endswith('@@'):
                                                 pos_end += 1
                                                 if pos_end > pos:
                                                     bpe_phrase = ' '.join(words[pos:pos_end+1])
@@ -2410,19 +2412,20 @@ cpdef main(args):
 
                                     # generate from null2trg
                                     #time_stop_start = time.time()
-                                    for j in range(len(null2trg_vocab)):
-                                        stopword = null2trg_vocab[j][0]
-                                        #count_test[6] += 1
-                                        tmpstr2 = stopword
-                                        tmp_id = getid_word(ivocab_trg, tmpstr2)
-                                        new_loss = log_probs[i][tmp_id]
-                                        new_candidate.phrase = tmpstr2 
-                                        new_candidate.pos = -1
-                                        new_candidate.pos_end = -1
-                                        new_candidate.next_state = element.automatons
-                                        new_candidate.loss = new_loss
-                                        new_candidate.prob_align = null2trg_vocab[j][1] #params.null2trg_prob
-                                        candidate_phrase_list_count[0] = add_candidate(candidate_phrase_list[0], candidate_phrase_list_count[0], new_candidate, beam_size)
+                                    if params.allow_null2stop:
+                                        for j in range(len(null2trg_vocab)):
+                                            stopword = null2trg_vocab[j][0]
+                                            #count_test[6] += 1
+                                            tmpstr2 = stopword
+                                            tmp_id = getid_word(ivocab_trg, tmpstr2)
+                                            new_loss = log_probs[i][tmp_id]
+                                            new_candidate.phrase = tmpstr2 
+                                            new_candidate.pos = -1
+                                            new_candidate.pos_end = -1
+                                            new_candidate.next_state = element.automatons
+                                            new_candidate.loss = new_loss
+                                            new_candidate.prob_align = null2trg_vocab[j][1] #params.null2trg_prob
+                                            candidate_phrase_list_count[0] = add_candidate(candidate_phrase_list[0], candidate_phrase_list_count[0], new_candidate, beam_size)
                                     #time_ce = time.time()
                                     #time_test[6] += time_ce-time_cs
                                     #time_test[9] += time_ce-time_stop_start
@@ -2630,6 +2633,9 @@ cpdef main(args):
             '''
             
 
+            if result == "FAILED":
+                fout.write('\n')
+                continue
             #fout.write((result.replace(' <eos>', '').strip()+'\n').encode('utf-8'))
             print((result.replace(' <eos>', '').strip()).encode('utf-8'))
 
