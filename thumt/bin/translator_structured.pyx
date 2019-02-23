@@ -243,6 +243,21 @@ cdef automatons automatons_build_structured(words_src, punc, pairpunc, params):
             pos += 1
         else:
             pos += 1
+    while level_pairpunc > 0:
+        level_pairpunc -= 1
+        result.states[current_state].pos_end = pos_result
+        result.states[current_state].visible = <int *> malloc(len(ranges[current_state])*sizeof(int))
+        for j in range(len(ranges[current_state])):
+            result.states[current_state].visible[j] = ranges[current_state][j]
+        result.states[current_state].num_visible = len(ranges[current_state])
+        current_state = result.states[current_state].outer
+
+        result.states[current_state].visible = <int *> malloc(len(ranges[current_state])*sizeof(int))
+        for j in range(len(ranges[current_state])):
+            result.states[current_state].visible[j] = ranges[current_state][j]
+        result.states[current_state].num_visible = len(ranges[current_state]) 
+        current_state = result.states[current_state].outer
+
     result.states[current_state].visible = <int *> malloc(len(ranges[current_state])*sizeof(int))
     for j in range(len(ranges[current_state])):
         result.states[current_state].visible[j] = ranges[current_state][j]
@@ -2633,7 +2648,7 @@ cpdef main(args):
             '''
             
 
-            if result == "FAILED":
+            if result == "":
                 fout.write('\n')
                 continue
             #fout.write((result.replace(' <eos>', '').strip()+'\n').encode('utf-8'))
