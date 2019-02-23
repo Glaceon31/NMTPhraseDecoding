@@ -35,7 +35,7 @@ from libc.math cimport pow, log
 
 cdef struct automatons_state:
     int next_state
-    int inner[20]
+    int inner[50]
     int num_inner
     int outer
     int *visible
@@ -49,7 +49,7 @@ cdef struct automatons_state:
 
 cdef struct automatons:
     int state_num
-    automatons_state states[20]
+    automatons_state states[50]
 
 
 def get_tag_name(word):
