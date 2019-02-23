@@ -61,6 +61,8 @@ def get_tag_name(word):
 
 
 def is_end_tag(word):
+    if len(word) < 2 or word.endswith('@@'):
+        return False
     if word[0] == '<' and word[1] == '/' and word[-1] == '>':
         return True
     return False
@@ -87,6 +89,8 @@ def load_pairpunc(puncfile):
 
 
 def is_start_tag(word):
+    if len(word) < 2 or word.endswith('@@'):
+        return False
     if word[0] == '<' and word[1] != '/' and word[-1] == '>':
         return True
     return False
@@ -391,6 +395,21 @@ def automatons_build_structured_other(words_src, punc, pairpunc, params):
             pos += 1
         else:
             pos += 1
+    while level_pairpunc > 0:
+        level_pairpunc -= 1
+        result.states[current_state].pos_end = pos_result
+        result.states[current_state].visible = <int *> malloc(len(ranges[current_state])*sizeof(int))
+        for j in range(len(ranges[current_state])):
+            result.states[current_state].visible[j] = ranges[current_state][j]
+        result.states[current_state].num_visible = len(ranges[current_state])
+        current_state = result.states[current_state].outer
+
+        result.states[current_state].visible = <int *> malloc(len(ranges[current_state])*sizeof(int))
+        for j in range(len(ranges[current_state])):
+            result.states[current_state].visible[j] = ranges[current_state][j]
+        result.states[current_state].num_visible = len(ranges[current_state]) 
+        current_state = result.states[current_state].outer
+
     result.states[current_state].visible = <int *> malloc(len(ranges[current_state])*sizeof(int))
     for j in range(len(ranges[current_state])):
         result.states[current_state].visible[j] = ranges[current_state][j]
@@ -970,7 +989,8 @@ def splitline(line):
     result = line.split(' ')
     pos = 0
     while pos < len(result):
-        if result[pos][0] == '<' and result[pos][-1] != '>':
+        #if result[pos][0] == '<' and result[pos][-1] != '>':
+        if result[pos][0] == '<' and not result[pos].endswith('@@') and len(result[pos]) > 1 and result[pos][-1] != '>':
             result[pos] += ' '+result[pos+1]
             del result[pos+1]
         else:
