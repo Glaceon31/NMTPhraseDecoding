@@ -73,10 +73,10 @@ if __name__ == "__main__":
             continue
         print('=== %d ===' %i)
         print('src:', lsrc[i])
-        print('ours:', lhypo[i], '('+str(bleu(rbpe(lhypo[i]), reftmp, 4, verbose=True))+')')
+        print('ours:    ', lhypo[i], '('+str(bleu(rbpe(lhypo[i]), reftmp, 4, verbose=True))+')')
         print('baseline:', lbase[i], '('+str(bleu(rbpe(lbase[i]), reftmp, 4, verbose=True))+')')
         if args.compare:
-            print('compare:', lcompare[i], '('+str(bleu(rbpe(lcompare[i]), reftmp, 4, verbose=True))+')')
+            print('compare: ', lcompare[i], '('+str(bleu(rbpe(lcompare[i]), reftmp, 4, verbose=True))+')')
         #print('oracle:', loracle[i], '('+str(bleu(rbpe(loracle[i]), reftmp, 4, verbose=True))+')')
         if bleu(rbpe(lhypo[i]), reftmp, 4, verbose=True) > bleu(rbpe(lcompare[i]), reftmp, 4, verbose=True):
             better += 1

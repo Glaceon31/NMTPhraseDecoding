@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The THUMT Authors
+# Copyright 2017-2019 The THUMT Authors
 
 from __future__ import absolute_import
 from __future__ import division
@@ -8,13 +8,17 @@ from __future__ import print_function
 import copy
 
 import tensorflow as tf
-import thumt.interface as interface
 import thumt.layers as layers
+import thumt.losses as losses
+import thumt.utils as utils
+
+from thumt.models.model import NMTModel
 
 
 def model_graph(features, mode, params):
     src_vocab_size = len(params.vocabulary["source"])
     tgt_vocab_size = len(params.vocabulary["target"])
+    dtype = tf.get_variable_scope().dtype
 
     src_seq = features["source"]
     tgt_seq = features["target"]
@@ -61,14 +65,14 @@ def model_graph(features, mode, params):
             output_keep_prob=1.0 - params.dropout,
             variational_recurrent=params.use_variational_dropout,
             input_size=params.embedding_size,
-            dtype=tf.float32
+            dtype=dtype
         )
         cell_d = tf.nn.rnn_cell.DropoutWrapper(
             cell_d,
             output_keep_prob=1.0 - params.dropout,
             variational_recurrent=params.use_variational_dropout,
             input_size=params.embedding_size,
-            dtype=tf.float32
+            dtype=dtype
         )
 
         if params.use_residual:
@@ -84,7 +88,7 @@ def model_graph(features, mode, params):
     with tf.variable_scope("encoder"):
         _, final_state = tf.nn.dynamic_rnn(cell_enc, src_inputs,
                                            features["source_length"],
-                                           dtype=tf.float32)
+                                           dtype=dtype)
     # Shift left
     shifted_tgt_inputs = tf.pad(tgt_inputs, [[0, 0], [1, 0], [0, 0]])
     shifted_tgt_inputs = shifted_tgt_inputs[:, :-1, :]
@@ -109,7 +113,7 @@ def model_graph(features, mode, params):
     logits = tf.reshape(logits, [-1, tgt_vocab_size])
     labels = features["target"]
 
-    ce = layers.nn.smoothed_softmax_cross_entropy_with_logits(
+    ce = losses.smoothed_softmax_cross_entropy_with_logits(
         logits=logits,
         labels=labels,
         smoothing=params.label_smoothing,
@@ -132,17 +136,21 @@ def model_graph(features, mode, params):
     return loss
 
 
-class Seq2Seq(interface.NMTModel):
+class Seq2Seq(NMTModel):
 
     def __init__(self, params, scope="seq2seq"):
         super(Seq2Seq, self).__init__(params=params, scope=scope)
 
-    def get_training_func(self, initializer, regularizer=None):
+    def get_training_func(self, initializer, regularizer=None, dtype=None):
         def training_fn(features, params=None, reuse=None):
             if params is None:
                 params = self.parameters
+
+            custom_getter = utils.custom_getter if dtype else None
+
             with tf.variable_scope(self._scope, initializer=initializer,
-                                   regularizer=regularizer, reuse=reuse):
+                                   regularizer=regularizer, reuse=reuse,
+                                   custom_getter=custom_getter, dtype=dtype):
                 loss = model_graph(features, "train", params)
                 return loss
 

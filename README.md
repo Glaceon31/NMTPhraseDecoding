@@ -1,19 +1,25 @@
 # THUMT: An Open Source Toolkit for Neural Machine Translation
 ## Contents
 * [Introduction](#introduction)
+* [Online Demo](#online-demo)
 * [Implementations](#implementations)
+* [Notable Features](#notable-features)
 * [License](#license)
 * [Citation](#citation)
 * [Development Team](#development-team)
-* [Contributors](#Contributors)
+* [Contributors](#contributors)
 * [Contact](#contact)
+* [Derivative Repositories](#derivative-repositories)
 
 ## Introduction
 
 Machine translation is a natural language processing task that aims to translate natural languages using computers automatically. Recent several years have witnessed the rapid development of end-to-end neural machine translation, which has become the new mainstream method in practical MT systems.
 
-THUMT is an open-source toolkit for neural machine translation developed by [the Natural Language Processing Group at Tsinghua University](http://nlp.csai.tsinghua.edu.cn/site2/index.php?lang=en).
+THUMT is an open-source toolkit for neural machine translation developed by [the Natural Language Processing Group at Tsinghua University](http://nlp.csai.tsinghua.edu.cn/site2/index.php?lang=en). The website of THUMT is: [http://thumt.thunlp.org/](http://thumt.thunlp.org/).
 
+## Online Demo
+
+The online demo of THUMT is available at [http://translate.thumt.cn/](http://101.6.5.207:3892/). The languages involved include Ancient Chinese, Arabic, Chinese, English, French, German, Indonesian, Japanese, Portugese, Russian, and Spanish.
 
 ## Implementations
 THUMT has currently two main implementations:
@@ -31,6 +37,20 @@ The following table summarizes the features of two implementations:
 | TensorFlow   |  Seq2Seq, RNNsearch, Transformer | MLE| Adam | RNNsearch, Transformer |
 
 We recommend using [THUMT-TensorFlow](https://github.com/thumt/THUMT), which delivers better translation performance than [THUMT-Theano](https://github.com/thumt/THUMT/tree/theano). We will keep adding new features to [THUMT-TensorFlow](https://github.com/thumt/THUMT).
+
+It is also possible to exploit layer-wise relevance propagation to visualize the relevance between source and target words with THUMT:
+
+![Visualization with LRP](https://raw.githubusercontent.com/THUNLP-MT/THUMT/master/docs/fig/vis_transformer.png)
+
+## Notable Features
+
+- Transformer ([Vaswani et al., 2017](https://arxiv.org/abs/1706.03762))
+- Multi-GPU training & decoding
+- Distributed training
+- Float16 training
+- Model ensemble & Averaging
+- Relative position embedding ([Shaw et al., 2018](https://arxiv.org/pdf/1803.02155.pdf))
+- Visualization with layer-wise relevance propagation (**LRP**) ([Ding et al., 2017](http://nlp.csai.tsinghua.edu.cn/~ly/papers/acl2017_dyz.pdf))
 
 ## License
 
@@ -54,3 +74,7 @@ Project members: Jiacheng Zhang, Yanzhuo Ding, Shiqi Shen, Yong Cheng
 ## Contact
 
 If you have questions, suggestions and bug reports, please email [thumt17@gmail.com](mailto:thumt17@gmail.com).
+
+## Derivative Repositories
+* [Document-Transformer](https://github.com/THUNLP-MT/Document-Transformer) (Improving the Transformer Translation Model with Document-Level Context)
+* [PR4NMT](https://github.com/THUNLP-MT/PR4NMT) (Prior Knowledge Integration for Neural Machine Translation using Posterior Regularization)

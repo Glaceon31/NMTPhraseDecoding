@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The THUMT Authors
+# Copyright 2017-2019 The THUMT Authors
 
 from __future__ import absolute_import
 from __future__ import division
@@ -15,14 +15,15 @@ def linear(inputs, output_size, bias, concat=True, dtype=None, scope=None):
     :param output_size: An integer specify the output size
     :param bias: a boolean value indicate whether to use bias term
     :param concat: a boolean value indicate whether to concatenate all inputs
-    :param dtype: an instance of tf.DType, the default value is ``tf.float32''
+    :param dtype: an instance of tf.DType
     :param scope: the scope of this layer, the default value is ``linear''
     :returns: a Tensor with shape [batch, output_size]
     :raises RuntimeError: raises ``RuntimeError'' when input sizes do not
                           compatible with each other
     """
 
-    with tf.variable_scope(scope, default_name="linear", values=[inputs]):
+    with tf.variable_scope(scope, default_name="linear", values=[inputs],
+                           dtype=dtype):
         if not isinstance(inputs, (list, tuple)):
             inputs = [inputs]
 
@@ -43,20 +44,20 @@ def linear(inputs, output_size, bias, concat=True, dtype=None, scope=None):
             inputs = tf.concat(inputs, 1)
 
             shape = [input_size, output_size]
-            matrix = tf.get_variable("matrix", shape, dtype=dtype)
+            matrix = tf.get_variable("matrix", shape)
             results.append(tf.matmul(inputs, matrix))
         else:
             for i in range(len(input_size)):
                 shape = [input_size[i], output_size]
                 name = "matrix_%d" % i
-                matrix = tf.get_variable(name, shape, dtype=dtype)
+                matrix = tf.get_variable(name, shape)
                 results.append(tf.matmul(inputs[i], matrix))
 
         output = tf.add_n(results)
 
         if bias:
             shape = [output_size]
-            bias = tf.get_variable("bias", shape, dtype=dtype)
+            bias = tf.get_variable("bias", shape)
             output = tf.nn.bias_add(output, bias)
 
         output = tf.reshape(output, output_shape)
@@ -114,48 +115,3 @@ def layer_norm(inputs, epsilon=1e-6, dtype=None, scope=None):
         norm_inputs = (inputs - mean) * tf.rsqrt(variance + epsilon)
 
         return norm_inputs * scale + offset
-
-
-def smoothed_softmax_cross_entropy_with_logits(**kwargs):
-    logits = kwargs.get("logits")
-    labels = kwargs.get("labels")
-    smoothing = kwargs.get("smoothing") or 0.0
-    normalize = kwargs.get("normalize")
-    scope = kwargs.get("scope")
-
-    if logits is None or labels is None:
-        raise ValueError("Both logits and labels must be provided")
-
-    with tf.name_scope(scope or "smoothed_softmax_cross_entropy_with_logits",
-                       values=[logits, labels]):
-
-        labels = tf.reshape(labels, [-1])
-
-        if not smoothing:
-            ce = tf.nn.sparse_softmax_cross_entropy_with_logits(
-                logits=logits,
-                labels=labels
-            )
-            return ce
-
-        # label smoothing
-        vocab_size = tf.shape(logits)[1]
-
-        n = tf.to_float(vocab_size - 1)
-        p = 1.0 - smoothing
-        q = smoothing / n
-
-        soft_targets = tf.one_hot(tf.cast(labels, tf.int32), depth=vocab_size,
-                                  on_value=p, off_value=q)
-        xentropy = tf.nn.softmax_cross_entropy_with_logits(logits=logits,
-                                                           labels=soft_targets)
-
-        if normalize is False:
-            return xentropy
-
-        # Normalizing constant is the best cross-entropy value with soft
-        # targets. We subtract it just for readability, makes no difference on
-        # learning
-        normalizing = -(p * tf.log(p) + n * q * tf.log(q + 1e-20))
-
-        return xentropy - normalizing

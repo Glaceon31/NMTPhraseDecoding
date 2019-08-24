@@ -20,6 +20,7 @@ import numpy as np
 import math
 import time
 import traceback
+import re
 
 cimport cython
 from libc.stdlib cimport malloc, free
@@ -990,7 +991,8 @@ def splitline(line):
     pos = 0
     while pos < len(result):
         #if result[pos][0] == '<' and result[pos][-1] != '>':
-        if result[pos][0] == '<' and not result[pos].endswith('@@') and len(result[pos]) > 1 and result[pos][-1] != '>':
+        #if result[pos][0] == '<' and not result[pos].endswith('@@') and len(result[pos]) > 1 and result[pos][-1] != '>':
+        if result[pos][0] == '<' and len(result[pos]) > 1 and result[pos][-1] != '>':
             result[pos] += ' '+result[pos+1]
             del result[pos+1]
         else:
@@ -1682,6 +1684,17 @@ def get_src2null_prob(src2null_prob, word):
         return 0.
 
 
+def parse_golden(src):
+    goldphrase = {}
+    constraints = re.findall(r'<cons translation="(.*?)"> (.*?) </cons>',src)
+    for cons in constraints:
+        goldphrase[cons[1]] = cons[0]
+    src = re.sub("</cons>", "", src)
+    src = re.sub(r'<cons translation="(.*?)">', "", src)
+    src = ' '.join(src.split())
+    print('after parse golden:', src)
+    return goldphrase, src
+
 cdef float get_lp(int length, float alpha):
     return pow((5.0 + length) / 6.0, alpha)
 
@@ -1840,9 +1853,9 @@ cpdef main(args):
         stoplist = load_line(args.stoplist)
         print('stoplist:', stoplist)
         goldphrase = None
-        if params.use_golden:
-            goldphrase = load_goldphrase(args.goldphrase)
-            print('golden phrase:', goldphrase)
+        #if params.use_golden:
+        #    goldphrase = load_goldphrase(args.goldphrase)
+        #    print('golden phrase:', goldphrase)
         punc = None
         if params.punc_border:
             punc = load_punc(args.puncfile)
@@ -1974,6 +1987,9 @@ cpdef main(args):
                 src = copy.deepcopy(input)
                 src = src.decode('utf-8')
                 #words = src.split(' ')
+                if params.use_golden:
+                    goldphrase, src = parse_golden(src)
+                    print('goldphrase', goldphrase)
                 words = splitline(src)
                 #print('words:', words)
                 # build automatons
@@ -2672,7 +2688,10 @@ cpdef main(args):
                 fout.write('\n')
                 continue
             #fout.write((result.replace(' <eos>', '').strip()+'\n').encode('utf-8'))
-            print((result.replace(' <eos>', '').strip()).encode('utf-8'))
+            try:
+                print((result.replace(' <eos>', '').strip()).encode('utf-8'))
+            except:
+                print("print result error")
 
             end = time.time()
             global time_totalsp
@@ -2737,8 +2756,13 @@ cpdef main(args):
                 #    break
                     
 
-            print('final:', ' '.join(words_trg).encode('utf-8'))
-            fout.write((' '.join(' '.join(words_trg).split()).strip()+'\n').encode('utf-8'))
+            try:
+                print('final:', ' '.join(words_trg).encode('utf-8'))
+                fout.write((' '.join(' '.join(words_trg).split()).strip()+'\n').encode('utf-8'))
+            except:
+                print('print final failed')
+                print(' '.join(words_trg))
+                fout.write((' '.join(' '.join(words_trg).split()).strip()+'\n'))
             '''
             if args.verbose:
                 len_now = len(finished[0][0].split(' '))-1

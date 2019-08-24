@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The THUMT Authors
+# Copyright 2017-2019 The THUMT Authors
 
 from __future__ import absolute_import
 from __future__ import division
@@ -43,7 +43,7 @@ def _read_checkpoint_def(filename):
         fd.readline()
 
         for line in fd:
-            records.append(line.strip().split(":")[-1].strip()[1:-1])
+            records.append(line.strip().split(":")[-1].strip()[1:-1].split("/")[-1])
 
     return records
 
@@ -168,6 +168,10 @@ def _evaluate(eval_fn, input_fn, decode_fn, path, config):
                     all_refs[i].extend(references[i])
 
         decoded_symbols = decode_fn(all_outputs)
+
+        for i, l in enumerate(decoded_symbols):
+            decoded_symbols[i] = " ".join(l).replace("@@ ", "").split()
+
         decoded_refs = [decode_fn(refs) for refs in all_refs]
         decoded_refs = [list(x) for x in zip(*decoded_refs)]
 
@@ -356,3 +360,28 @@ class EvaluationHook(tf.train.SessionRunHook):
 
             best_score = records[0][1]
             tf.logging.info("Best score: %f" % best_score)
+
+
+class MultiStepHook(tf.train.SessionRunHook):
+
+    def __init__(self, hook, step=1):
+        self._hook = hook
+        self._step = step
+        self._iter = 0 if step == 1 else 1
+
+    def begin(self):
+        self._hook.begin()
+
+    def after_create_session(self, session, coord):
+        self._hook.after_create_session(session, coord)
+
+    def before_run(self, run_context):
+        return self._hook.before_run(run_context)
+
+    def after_run(self, run_context, run_values):
+        if self._iter % self._step == 0:
+            self._hook.after_run(run_context, run_values)
+        self._iter = (self._iter + 1) % self._step
+
+    def end(self, session):
+        self._hook.end(session)

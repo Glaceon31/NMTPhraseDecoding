@@ -48,16 +48,26 @@ Criterion               & MRT & $\surd$ & $\times$ \\
  & SGD & $\surd$ & $\times$ \\
 Optimizer & AdaDelta & $\surd$ & $\times$ \\
  & Adam & $\surd$ & $\surd$ \\
+ & LazyAdam & $\times$ & $\surd$ \\ 
 \hline
   & Seq2Seq & $\times$ & $\times$ \\
-LRP        & RNNsearch & $\surd$ & $\times$ \\
-        & Transformer & $\times$ & $\times$ \\
+LRP        & RNNsearch & $\surd$ & $\surd$ \\
+        & Transformer & $\times$ & $\surd$ \\
 \hline
 \end{tabular}
 \caption{Two implementations of THUMT.} \label{table:1:implementation}
 \end{table}
 
 We recommend using THUMT-TensorFlow, which delivers better translation performance than THUMT-Theano. We will keep adding new features to THUMT-TensorFlow. This document is the user manual for THUMT-TensorFlow. For simplicity, we refer to THUMT-TesnorFlow as THUMT below.
+
+As shown in figure \ref{fig:visualization}, it is also possible to exploit layer-wise relevance propagation \cite{Ding:17} to visualize the relevance between source and target words with THUMT. 
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=1\textwidth]{fig/vis_transformer.png}
+    \caption{Visualizing the relevance between source and target words.}
+    \label{fig:visualization}
+\end{figure}
 
 
 \section{Installation}
@@ -72,7 +82,7 @@ THUMT supports Linux i686 and Mac OSX. The following third-party software and to
 \subsection{Installing THUMT}
 The source code of THUMT is available at \href{https://github.com/thumt/THUMT}{https://github.com/thumt/THUMT}. Here is a brief guide on how to install THUMT.
 
-\subsubsection{Step1: Downloading the Package}
+\subsubsection{Step 1: Downloading the Package}
 Download the package using the following command:
 \\
 \begin{everbatim}
@@ -101,6 +111,8 @@ To set these environment variable permanently for all future bash sessions, user
 
 \section{User Guide}
 
+We provide a step-by-step guide with a running example: WMT 2017 German-English news translation shared task.
+
 \subsection{Data Preparation}
 \subsubsection{Obtaining the Datasets}
 Running THUMT involves three types of datasets:
@@ -111,7 +123,8 @@ Running THUMT involves three types of datasets:
 \item {\em Test set}: a set of source sentences paired with single or multiple target translations used for evaluating translation performance on unseen texts.
 \end{enumerate}
 
-In this user manual, we take the preprocessed German-English dataset of the WMT 2017 news translation shared task as an example.\footnote{\href{http://data.statmt.org/wmt17/translation-task/preprocessed/de-en/}{http://data.statmt.org/wmt17/translation-task/preprocessed/de-en/}}  Download and unpack the two files \verb|corpus.tc.de.gz| and \verb|corpus.tc.en.gz|:
+In this user manual, we'll use the preprocessed official dataset
+\footnote{\href{http://data.statmt.org/wmt17/translation-task/preprocessed/de-en/}{http://data.statmt.org/wmt17/translation-task/preprocessed/de-en/}}.  Download and unpack the two files \verb|corpus.tc.de.gz| and \verb|corpus.tc.en.gz|:
 \\
 \begin{everbatim}
 $ gunzip corpus.tc.de.gz corpus.tc.en.gz
@@ -157,25 +170,25 @@ $ python subword-nmt/apply_bpe.py --vocabulary vocab.en
 corpus.tc.32k.en
 \end{everbatim}
 \\
-
-The validation set also needs to be processed using the \verb|apply_bpe.py| script.
+The source side of the validation set and the test set also needs to be processed using the \verb|apply_bpe.py| script.
 \\
 \begin{everbatim}
 $ python subword-nmt/apply_bpe.py --vocabulary vocab.de
 --vocabulary-threshold 50 -c bpe32k < newstest2014.tc.de >
 newstest2014.tc.32k.de
-$ python subword-nmt/apply_bpe.py --vocabulary vocab.en
---vocabulary-threshold 50 -c bpe32k < newstest2014.tc.en >
-newstest2014.tc.32k.en
-\end{everbatim}
-\\
-Finally, the source side of the test side is processed as well.
-\\
-\begin{everbatim}
 $ python subword-nmt/apply_bpe.py --vocabulary vocab.de
 --vocabulary-threshold 50 -c bpe32k < newstest2015.tc.de >
 newstest2015.tc.32k.de
 \end{everbatim}
+\\
+Kindly note that while the source side of the validation set and test set is applied with BPE operations, the target side of them are not needed to be applied. This is because when evaluating the translation outputs, we will restore them in the normal tokenization and compare them with the original ground-truth sentences.
+%Finally, the source side of the test side is processed as well.
+%\\
+%\begin{everbatim}
+%$ python subword-nmt/apply_bpe.py --vocabulary vocab.de
+%--vocabulary-threshold 50 -c bpe32k < newstest2015.tc.de >
+%newstest2015.tc.32k.de
+%\end{everbatim}
 
 \subsubsection{Shuffling Training Set}
 The next step is to shuffle the training set, which proves to be helpful for improving the translation quality. Simply run the following command:
@@ -210,15 +223,20 @@ The command for training a Transformer model is given by
 $ python THUMT/thumt/bin/trainer.py --input corpus.tc.32k.de.shuf
 corpus.tc.32k.en.shuf --vocabulary vocab.32k.de.txt
 vocab.32k.en.txt --model transformer --validation
-newstest2014.tc.32k.de --references newstest2014.tc.32k.en
---parameters=batch_size=6250,device_list=[0],train_steps=200000
+newstest2014.tc.32k.de --references newstest2014.tc.en
+--parameters=batch_size=6250,device_list=[0],update_cycle=4,
+train_steps=200000
 \end{everbatim}
 \\
-Note that we set the \verb|batch_size| to 6,250 words instead of 6,250 sentences. By default, the batch size for the Transformer model is defined in terms of word number rather than sentence number in THUMT.
+Note that we set the \verb|batch_size| on each device (e.g. GPU) to 6,250 words instead of 6,250 sentences. By default, the batch size for the Transformer model is defined in terms of word number rather than sentence number in THUMT. We set \verb|update_cycle| to 4, which means the model parameters are updated every 4 batches. This effectively simulates the setting of ``\verb|batch_size|=25,000'' and requires less GPU memory.
 
-``\verb|device_list=[0]|'' suggests that \verb|gpu0| is used to train the model. THUMT supports to train NMT models on multiple GPUs. If both \verb|gpu0| and \verb|gpu1| are available, simply set ``\verb|device_list=[0,1]|''. You may use the \verb|nvidia-smi| command to find unused GPUs.
+``\verb|device_list=[0]|'' suggests that \verb|gpu0| is used to train the model. THUMT supports to train NMT models on multiple GPUs. If both \verb|gpu0| and \verb|gpu1| are available, simply set ``\verb|device_list=[0,1],update_cycle=2|'' for the same batch size of 25000 (but with the training speed doubled). You may use the \verb|nvidia-smi| command to find unused GPUs.
 
-By setting ``\verb|train_steps=200000|'', the training process will terminate at iteration 200,000. During the training, the \verb|trainer.py| script creates a \verb|train| folder to store intermediate models called {\em checkpoints}, which will be evaluated on the validation set periodically. Only a small number of checkpoints that achieves highest BLEU scores on the validation set will be saved in the \verb|train/eval| folder. This folder will be used in decoding. Please refer to Appendix \ref{appendix:1} for more details about the parameters of the \verb|trainer.py| script.
+By setting ``\verb|train_steps=200000|'', the training process will terminate at iteration 200,000. During the training, the \verb|trainer.py| script creates a \verb|train| folder to store intermediate models called {\em checkpoints}, which will be evaluated on the validation set periodically. 
+
+Please kindly note again that while the source side of the validation set is applied with BPE operations ( ``\verb|newstest2014.tc.32k.de|''), the target side of the validation set is in the original tokenization ( ``\verb|newstest2014.tc.en|''). Note that relative position encoding (see Section 5.1) is turned on as default; to turn it off, please set \verb|position_info_type="absolute"| in the \verb|parameters|.
+
+Only a small number of checkpoints that achieves highest BLEU scores on the validation set will be saved in the \verb|train/eval| folder. This folder will be used in decoding. Please refer to Appendix \ref{appendix:1} for more details about the parameters of the \verb|trainer.py| script.
 
 \subsubsection{RNNsearch}
 
@@ -228,7 +246,7 @@ The command for training an RNNsearch model is given by
 $ python THUMT/thumt/bin/trainer.py --input corpus.tc.32k.de.shuf
 corpus.tc.32k.en.shuf --vocabulary vocab.32k.de.txt
 vocab.32k.en.txt --model rnnsearch --validation
-newstest2014.tc.32k.de --references newstest2014.tc.32k.en
+newstest2014.tc.32k.de --references newstest2014.tc.en
 --parameters=batch_size=128,device_list=[0],train_steps=200000
 \end{everbatim}
 \\
@@ -242,7 +260,7 @@ The command for training a Seq2Seq model is given by
 $ python THUMT/thumt/bin/trainer.py --input corpus.tc.32k.de.shuf
 corpus.tc.32k.en.shuf --vocabulary vocab.32k.de.txt
 vocab.32k.en.txt --model seq2seq --validation
-newstest2014.tc.32k.de --references newstest2014.tc.32k.en
+newstest2014.tc.32k.de --references newstest2014.tc.en
 --parameters=batch_size=128,device_list=[0],train_steps=200000
 \end{everbatim}
 \\
@@ -256,10 +274,13 @@ The command for translating the test set using the trained Transformer model is 
 $ python THUMT/thumt/bin/translator.py --models transformer
 --input newstest2015.tc.32k.de --output newstest2015.trans
 --vocabulary vocab.32k.de.txt vocab.32k.en.txt 
---checkpoints train/eval --parameters=device_list=[0]
+--checkpoints train/eval --parameters=device_list=[0],
+decode_alpha=0.6
 \end{everbatim}
 \\
-The commands for using RNNsearch and Seq2Seq models are similar except for the \verb|--models| argument. The translation file output by the \verb|translator.py| is \verb|newstest2015.trans|, which needs to be restored to the normal tokenization using the following command:
+The commands for using RNNsearch and Seq2Seq models are similar except for the \verb|--models| argument. Please kindly note that a lot of decoding techniques are actually working on the test set here, i.e. \verb|decode_alpha|; varying \verb|decode_alpha| during the command for training process in Section 3.2 only leads to varied translation performances on the evaluation set. 
+\\
+The translation file output by the \verb|translator.py| is \verb|newstest2015.trans|, which needs to be restored to the normal tokenization using the following command:
 \\
 \begin{everbatim}
 $ sed -r 's/(@@ )|(@@ ?$)//g' < newstest2015.trans >
@@ -304,18 +325,20 @@ Yes. THUMT supports to train NMT models on multiple GPUs. You may use the \verb|
 Yes. THUMT uses the \verb|checkpoint_averaging.py| script to average checkpoints generated during training to generate a better model. The script is located in the \verb|THUMT/thumt/scripts| folder. Simply run the following command:
 \\
 \begin{everbatim}
-$ python THUMT/thumt/scripts/checkpoint_averaging.py --path train
---checkpoints 5 --output averaged
+$ CUDA_VISIBLE_DEVICES=0 python THUMT/thumt/scripts/checkpoint_
+averaging.py --path train --checkpoints 5 --output averaged
 \end{everbatim}
 \\
-By default, the \verb|train| folder saves the last 20 checkpoints. The above command averages the last 5 checkpoints and saves the averaged model in the \verb|averaged| folder. You may change the number of checkpoints by modifying the \verb|--checkpoints| argument.
+By default, the \verb|train| folder saves the last 20 checkpoints. The above command averages the last 5 checkpoints and saves the averaged model in the \verb|averaged| folder. You may change the number of checkpoints by modifying the \verb|--checkpoints| argument. You can specify the GPU(s) to be used in \verb|CUDA_VISIBLE_DEVICES|.
+
 
 \subsection{Does THUMT support model ensemble?}
 
 Yes. Suppose THUMT runs four times on the same training data. Due to random initialization, the four trained models are different. The following command can be used to ensemble the four models located in four separated folders (e.g., \verb|run1|, \verb|run2|, \verb|run3|, and \verb|run4|):
 \\
 \begin{everbatim}
-$ python THUMT/thumt/bin/translator.py --models transformer
+$ python THUMT/thumt/bin/translator.py 
+--models transformer transformer transformer transformer
 --input newstest2015.tc.32k.de --output newstest2015.trans
 --vocabulary vocab.32k.de vocab.32k.en
 --checkpoints run1/train run2/train run3/train run4/train
@@ -336,9 +359,9 @@ An example command is shown below:
 $python THUMT/thumt/bin/trainer.py --input corpus.tc.32k.de.shuf
 corpus.tc.32k.en.shuf --vocabulary vocab.32k.de.txt
 vocab.32k.en.txt --model transformer --validation
-newstest2014.tc.32k.de --references newstest2014.tc.32k.en
---parameters=batch_size=6250,device_list=[0],train_steps=200000,
-keep_checkpoint_max=5,keep_top_checkpoint_max=1
+newstest2014.tc.32k.de --references newstest2014.tc.en
+--parameters=batch_size=6250,device_list=[0],update_cycle=4,
+train_steps=200000,keep_checkpoint_max=5,keep_top_checkpoint_max=1
 \end{everbatim}
 
 \subsection{How to display the BLEU scores on the validation set?}
@@ -349,8 +372,8 @@ $ nohup python THUMT/thumt/bin/trainer.py --input
 corpus.tc.32k.de.shuf corpus.tc.32k.en.shuf --vocabulary
 vocab.32k.de.txt vocab.32k.en.txt --model transformer
 --validation newstest2014.tc.32k.de --references
-newstest2014.tc.32k.en --parameters=batch_size=6250,
-device_list=[0],train_steps=200000,eval_step=5000 &
+newstest2014.tc.en --parameters=batch_size=6250,device_list=[0],
+update_cycle=4,train_steps=200000,eval_step=5000 &
 \end{everbatim}
 \\
 Output that would normally go to the terminal goes to a file called \verb|nohup.out|. Since the parameter \verb|eval_step| is set to 5,000, the intermediate model will be validated for every 5,000 steps. Here is an example output for validation:
@@ -358,59 +381,130 @@ Output that would normally go to the terminal goes to a file called \verb|nohup.
 \begin{everbatim}
 INFO:tensorflow:Validating model at step 5000
 INFO:tensorflow:Restoring parameters from train/model.ckpt-5000
-INFO:tensorflow:BLEU at step 5000: 0.283899
+INFO:tensorflow:BLEU at step 5000: 0.260194
 INFO:tensorflow:Copying train/model.ckpt-5000 to train/eval/
 model.ckpt-5000
-INFO:tensorflow:Best score at step 5000: 0.283899
+INFO:tensorflow:Best score at step 5000: 0.260194
 \end{everbatim}
 \\
-
-Therefore, you may run the following command to obtain all BLEU scores on the validation set:
+Therefore, you may run the following command to obtain all of the BLEU scores on the validation set:
 \\
 \begin{everbatim}
 $ grep 'BLEU at step' nohup.out
-INFO:tensorflow:BLEU at step 5000: 0.215739
-INFO:tensorflow:BLEU at step 10000: 0.274530
-INFO:tensorflow:BLEU at step 15000: 0.295066
-INFO:tensorflow:BLEU at step 20000: 0.310839
-INFO:tensorflow:BLEU at step 25000: 0.314701
-INFO:tensorflow:BLEU at step 30000: 0.324403
-INFO:tensorflow:BLEU at step 35000: 0.326532
-INFO:tensorflow:BLEU at step 40000: 0.327123
-INFO:tensorflow:BLEU at step 45000: 0.331918
-INFO:tensorflow:BLEU at step 50000: 0.335435
-INFO:tensorflow:BLEU at step 55000: 0.333007
-INFO:tensorflow:BLEU at step 60000: 0.337739
-INFO:tensorflow:BLEU at step 65000: 0.342414
-INFO:tensorflow:BLEU at step 70000: 0.343452
-INFO:tensorflow:BLEU at step 75000: 0.344703
-INFO:tensorflow:BLEU at step 80000: 0.342933
-INFO:tensorflow:BLEU at step 85000: 0.345208
-INFO:tensorflow:BLEU at step 90000: 0.345368
-INFO:tensorflow:BLEU at step 95000: 0.345791
-INFO:tensorflow:BLEU at step 100000: 0.348987
-INFO:tensorflow:BLEU at step 105000: 0.349707
-INFO:tensorflow:BLEU at step 110000: 0.346962
-INFO:tensorflow:BLEU at step 115000: 0.348421
-INFO:tensorflow:BLEU at step 120000: 0.349368
-INFO:tensorflow:BLEU at step 125000: 0.347384
-INFO:tensorflow:BLEU at step 130000: 0.351331
-INFO:tensorflow:BLEU at step 135000: 0.350806
-INFO:tensorflow:BLEU at step 140000: 0.351425
-INFO:tensorflow:BLEU at step 145000: 0.350630
-INFO:tensorflow:BLEU at step 150000: 0.349003
-INFO:tensorflow:BLEU at step 155000: 0.353210
-INFO:tensorflow:BLEU at step 160000: 0.352494
-INFO:tensorflow:BLEU at step 165000: 0.353489
-INFO:tensorflow:BLEU at step 170000: 0.351439
-INFO:tensorflow:BLEU at step 175000: 0.352664
-INFO:tensorflow:BLEU at step 180000: 0.352319
-INFO:tensorflow:BLEU at step 185000: 0.353467
-INFO:tensorflow:BLEU at step 190000: 0.354170
-INFO:tensorflow:BLEU at step 195000: 0.352935
-INFO:tensorflow:BLEU at step 200000: 0.353187
+INFO:tensorflow:BLEU at step 5000: 0.260194
+INFO:tensorflow:BLEU at step 10000: 0.311722
+INFO:tensorflow:BLEU at step 15000: 0.327413
+INFO:tensorflow:BLEU at step 20000: 0.337971
+INFO:tensorflow:BLEU at step 25000: 0.344361
+INFO:tensorflow:BLEU at step 30000: 0.346232
+INFO:tensorflow:BLEU at step 35000: 0.350668
+INFO:tensorflow:BLEU at step 40000: 0.352284
+INFO:tensorflow:BLEU at step 45000: 0.354420
+INFO:tensorflow:BLEU at step 50000: 0.357245
+INFO:tensorflow:BLEU at step 55000: 0.357739
+INFO:tensorflow:BLEU at step 60000: 0.357987
+INFO:tensorflow:BLEU at step 65000: 0.359559
+INFO:tensorflow:BLEU at step 70000: 0.358602
+INFO:tensorflow:BLEU at step 75000: 0.360472
+INFO:tensorflow:BLEU at step 80000: 0.358181
+INFO:tensorflow:BLEU at step 85000: 0.361301
+INFO:tensorflow:BLEU at step 90000: 0.360753
+INFO:tensorflow:BLEU at step 95000: 0.363404
+INFO:tensorflow:BLEU at step 100000: 0.360794
+INFO:tensorflow:BLEU at step 105000: 0.361658
+INFO:tensorflow:BLEU at step 110000: 0.363486
+INFO:tensorflow:BLEU at step 115000: 0.364089
+INFO:tensorflow:BLEU at step 120000: 0.363809
+INFO:tensorflow:BLEU at step 125000: 0.362085
+INFO:tensorflow:BLEU at step 130000: 0.362873
+INFO:tensorflow:BLEU at step 135000: 0.363781
+INFO:tensorflow:BLEU at step 140000: 0.364010
+INFO:tensorflow:BLEU at step 145000: 0.366973
+INFO:tensorflow:BLEU at step 150000: 0.364816
+INFO:tensorflow:BLEU at step 155000: 0.366183
+INFO:tensorflow:BLEU at step 160000: 0.363458
+INFO:tensorflow:BLEU at step 165000: 0.364465
+INFO:tensorflow:BLEU at step 170000: 0.365152
+INFO:tensorflow:BLEU at step 175000: 0.365256
+INFO:tensorflow:BLEU at step 180000: 0.364449
+INFO:tensorflow:BLEU at step 185000: 0.363845
+INFO:tensorflow:BLEU at step 190000: 0.365574
+INFO:tensorflow:BLEU at step 195000: 0.363678
+INFO:tensorflow:BLEU at step 200000: 0.364387
 \end{everbatim}
 \\
+
+\section{Advanced Features}
+
+Currently THUMT(-TensorFlow) has three advanced features: relative position encoding, half-precision training, and distributed training. Feel free to try them and your feedback is welcome!
+
+\subsection{Relative Position Encoding}
+
+Relative position encoding \citep{N18-2074} for Transformer aims at enabling learning dependency beyond a fixed length without disrupting temporal coherence. You can enable relative position encoding by setting \verb|position_info_type| \verb|="relative"| in \verb|parameters|. 
+
+An example usage is:
+\begin{everbatim}
+$ python THUMT/thumt/bin/trainer.py --input corpus.tc.32k.de.shuf
+corpus.tc.32k.en.shuf --vocabulary vocab.32k.de.txt
+vocab.32k.en.txt --model transformer --validation
+newstest2014.tc.32k.de --references newstest2014.tc.en
+--parameters=batch_size=6250,device_list=[0],update_cycle=4,
+position_info_type="relative",max_relative_dis=16,
+train_steps=200000
+\end{everbatim}
+
+where the \verb|max_relative_dis| parameter denotes the maximum relative distance defined in \citet{N18-2074}, the default value of which is 16 (for Transformer-base model). For Transformer-big model, the recommended value is 8. Please note that \verb|position_info_type| is set to \verb|"relative"| as default for a better performance; to disable relative position encoding, please explicitly set \verb|position_info_type="absolute"|.
+
+\subsection{Half-Precision Training}
+
+Half-precision training \citep{W18-6301} speeds up the training procedure.
+
+For half-precision training, please upgrade TensorFlow to version 1.13, and make sure that you have the GPUs with half-precision support, i.e. NVIDIA Volta GPUs or NVIDIA 2080 Ti.
+
+You can enable half-precision training by adding the option \verb|--half|. During training, all forward-backward computations as well as the all-reduce (gradient synchronization) between workers are performed in half precision (FP16). In contrast, the model weights that are updated are still in full precision (FP32) \cite{W18-6301}.
+
+Due to the scale of precision, the training might be unstable (as the training might not converge, or the loss value might become NaN at some point). As \citet{W18-6301} point out, in the beginning stages of training, the loss
+needs to be scaled down to avoid numerical overflow, while at the end of training, when the loss is small, we need to scale it up in order to avoid numerical underflow. You can alter the hyper-parameter \verb|loss_scale| to alleviate such problems. The default value of \verb|loss_scale| is 128.
+
+According to tests, half-precision training is at least 1.5 times faster than full-precision training.
+
+\subsection{Distributed Training}
+
+Distributed training makes use of machine clusters and speeds up the training procedure.
+
+For distributed training, please firstly install \href{https://github.com/horovod/horovod}{Horovod} and \href{https://www.open-mpi.org/software/ompi/v4.0/}{OpenMPI 4.0.0}, and make sure that the SSH automatic login is enabled between every two machines\footnote{\url{http://www.linuxproblem.org/art_9.html}}. In order to enable distributed training, just add the option \verb|--distribute|.
+
+Distributed training is conducted in a multi-process synchronizing manner. During training, each GPU itself is assigned with a process, which differs from the general single-process multi-GPU training. As a result, we need to use \verb|mpirun| to set up multiple \verb|python| processes for THUMT to run on different GPUs. An example usage is:
+\begin{everbatim}
+mpirun -np 16 \
+-H server1:4,server2:4,server3:4,server4:4 \
+-bind-to none -map-by slot \
+-x NCCL_DEBUG=INFO -x LD_LIBRARY_PATH -x PATH \
+-mca pml ob1 -mca btl ^openib \
+python trainer.py --distribute ...
+\end{everbatim}
+
+The above command will set up 16 \verb|python| processes running on \verb|server1|, \verb|server2|, \verb|server3|, \verb|server4|, 4 processes on each. You should also make sure that different servers share the same working directory. 
+
+You can also use \verb|horovodrun| for a simplified command:
+\begin{everbatim}
+horovodrun -np 16 \
+-H server1:4,server2:4,server3:4,server4:4 \
+python trainer.py --distribute ...
+\end{everbatim}
+
+\
+
+You can also try distributed training on a single machine, that is, using multiple GPUs by assigning one single process to each. As the \verb|device_list| won't work in the \verb|--distribute| setting, we need to specify the GPU(s) to be used in \verb|CUDA_VISIBLE_DEVICES|. 
+
+You can refer to the following usage as an example:
+\begin{everbatim}
+CUDA_VISIBLE_DEVICES=XXX horovodrun -np N \
+python trainer.py --distribute ...
+\end{everbatim}
+where \verb|N| is the number of GPUs or processes.
+
+According to tests, training in this setting is slightly faster than the general single-process multi-GPU training.
 
 \appendix
 
@@ -482,7 +576,9 @@ The parameters of the \verb|trainer.py| scripts is specified by a string contain
 \item \verb|residual_dropout|: the dropout rate used in residual connection. The default value is 0.1.
 \item \verb|attention_dropout|: the dropout rate used in attention mechanism. The default value is 0.0.
 \item\verb|relu_dropout|: the dropout rate used in feed forward layer. The default value is 0.0.
-\item \verb|label_smoothing|: the value of label smoothing. The default value is 0.1.
+\item\verb|label_smoothing|: the value of label smoothing. The default value is 0.1.
+\item\verb|position_info_type|: the type of position encoding, \verb|"relative"| for relative position encoding or \verb|"absolute"| for absolute (sinusoidal) position encoding. The default setting is \verb|"relative"|.
+\item\verb|max_relative_dis|: the value of maximum relative distance when using relative position encoding. The default value is 16 for Transformer-base model. For Transformer-big model, the recommended value is 8.
 \end{enumerate}
 
 \bibliographystyle{apalike}

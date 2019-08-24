@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The THUMT Authors
+# Copyright 2017-2019 The THUMT Authors
 
 from __future__ import absolute_import
 from __future__ import division
@@ -10,6 +10,7 @@ import operator
 
 import numpy as np
 import tensorflow as tf
+import thumt.utils.distribute as distribute
 
 
 def batch_examples(example, batch_size, max_length, mantissa_bits,
@@ -84,7 +85,7 @@ def batch_examples(example, batch_size, max_length, mantissa_bits,
 def get_training_input(filenames, params):
     """ Get input for training stage
 
-    :param filenames: A list contains [source_filename, target_filename]
+    :param filenames: A list contains [source_filenames, target_filenames]
     :param params: Hyper-parameters
 
     :returns: A dictionary of pair <Key, Tensor>
@@ -95,6 +96,10 @@ def get_training_input(filenames, params):
         tgt_dataset = tf.data.TextLineDataset(filenames[1])
 
         dataset = tf.data.Dataset.zip((src_dataset, tgt_dataset))
+
+        if distribute.is_distributed_training_mode():
+            dataset = dataset.shard(distribute.size(), distribute.rank())
+
         dataset = dataset.shuffle(params.buffer_size)
         dataset = dataset.repeat()
 
@@ -146,10 +151,9 @@ def get_training_input(filenames, params):
         features["target"] = tgt_table.lookup(features["target"])
 
         # Batching
-        shard_multiplier = len(params.device_list) * params.update_cycle
         features = batch_examples(features, params.batch_size,
                                   params.max_length, params.mantissa_bits,
-                                  shard_multiplier=shard_multiplier,
+                                  shard_multiplier=len(params.device_list),
                                   length_multiplier=params.length_multiplier,
                                   constant=params.constant_batch_size,
                                   num_threads=params.num_threads)
@@ -350,6 +354,11 @@ def get_evaluation_input(inputs, params):
 
 
 def get_inference_input(inputs, params):
+    if params.generate_samples:
+        batch_size = params.sample_batch_size
+    else:
+        batch_size = params.decode_batch_size
+
     with tf.device("/cpu:0"):
         dataset = tf.data.Dataset.from_tensor_slices(
             tf.constant(inputs)
@@ -372,7 +381,7 @@ def get_inference_input(inputs, params):
         )
 
         dataset = dataset.padded_batch(
-            params.decode_batch_size * len(params.device_list),
+            batch_size * len(params.device_list),
             {"source": [tf.Dimension(None)], "source_length": []},
             {"source": params.pad, "source_length": 0}
         )

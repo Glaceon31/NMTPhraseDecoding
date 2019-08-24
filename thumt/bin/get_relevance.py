@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # coding=utf-8
-# Copyright 2018 The THUMT Authors
+# Copyright 2017-2019 The THUMT Authors
 
 from __future__ import absolute_import
 from __future__ import division
@@ -9,9 +9,9 @@ from __future__ import print_function
 import argparse
 import itertools
 import os
+import six
 
 import time
-import cPickle
 import json
 import numpy as np
 import tensorflow as tf
@@ -20,6 +20,7 @@ import thumt.data.vocab as vocabulary
 import thumt.models as models
 
 np.set_printoptions(threshold=np.inf)
+
 
 def to_text(vocab, mapping, indice, params):
     decoded = []
@@ -30,6 +31,7 @@ def to_text(vocab, mapping, indice, params):
 
     decoded = " ".join(decoded)
     return decoded
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -90,12 +92,12 @@ def default_parameters():
 def merge_parameters(params1, params2):
     params = tf.contrib.training.HParams()
 
-    for (k, v) in params1.values().iteritems():
+    for (k, v) in six.iteritems(params1.values()):
         params.add_hparam(k, v)
 
     params_dict = params.values()
 
-    for (k, v) in params2.values().iteritems():
+    for (k, v) in six.iteritems(params2.values()):
         if k in params_dict:
             # Override
             setattr(params, k, v)
@@ -185,7 +187,7 @@ def set_variables(var_list, value_dict, prefix):
 def main(args):
     tf.logging.set_verbosity(tf.logging.INFO)
     # Load configs
-    model_cls_list = [models.get_model(model, lrp=True) 
+    model_cls_list = [models.get_model(model, lrp=True)
                       for model in args.models]
     params_list = [default_parameters() for _ in range(len(model_cls_list))]
     params_list = [
@@ -261,8 +263,8 @@ def main(args):
 
         assign_op = tf.group(*assign_ops)
 
-        params.add_hparam('intra_op_parallelism_threads',1)
-        params.add_hparam('inter_op_parallelism_threads',1)
+        params.add_hparam("intra_op_parallelism_threads", 1)
+        params.add_hparam("inter_op_parallelism_threads", 1)
         sess_creator = tf.train.ChiefSessionCreator(
             config=session_config(params)
         )
@@ -281,15 +283,16 @@ def main(args):
                 message = "Finished batch"" %d" % count
                 for i in range(src_seq.shape[0]):
                     count += 1
-                    src = to_text(params.vocabulary["source"], 
+                    src = to_text(params.vocabulary["source"],
                                   params.mapping["source"], src_seq[i], params)
-                    trg = to_text(params.vocabulary["target"], 
+                    trg = to_text(params.vocabulary["target"],
                                   params.mapping["target"], trg_seq[i], params)
-                    output = open(args.relevances + '/' + str(count), 'w')
-                    output.write('src: ' + src + '\n')
-                    output.write('trg: ' + trg + '\n')
-                    output.write('result: ' + str(rlv_info["result"][i]) + '\n')
+                    output = open(args.relevances + "/" + str(count), "w")
+                    output.write("src: " + src + "\n")
+                    output.write("trg: " + trg + "\n")
+                    output.write("result: %s\n" % str(rlv_info["result"][i]))
                 tf.logging.log(tf.logging.INFO, message)
+
 
 if __name__ == "__main__":
     main(parse_args())

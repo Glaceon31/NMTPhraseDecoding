@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2018 The THUMT Authors
+# Copyright 2017-2019 The THUMT Authors
 
 from __future__ import absolute_import
 from __future__ import division
@@ -8,8 +8,11 @@ from __future__ import print_function
 import copy
 
 import tensorflow as tf
-import thumt.interface as interface
 import thumt.layers as layers
+import thumt.losses as losses
+import thumt.utils as utils
+
+from thumt.models.model import NMTModel
 
 
 def _copy_through(time, length, output, new_output):
@@ -111,18 +114,19 @@ def _decoder(cell, inputs, memory, sequence_length, initial_state, dtype=None,
         inputs = tf.transpose(inputs, [1, 0, 2])
         mem_mask = tf.sequence_mask(sequence_length["source"],
                                     maxlen=tf.shape(memory)[1],
-                                    dtype=tf.float32)
-        bias = layers.attention.attention_bias(mem_mask, "masking")
+                                    dtype=dtype)
+        bias = layers.attention.attention_bias(mem_mask, "masking",
+                                               dtype=dtype)
         bias = tf.squeeze(bias, axis=[1, 2])
         cache = layers.attention.attention(None, memory, None, output_size)
 
-        input_ta = tf.TensorArray(tf.float32, time_steps,
+        input_ta = tf.TensorArray(dtype, time_steps,
                                   tensor_array_name="input_array")
-        output_ta = tf.TensorArray(tf.float32, time_steps,
+        output_ta = tf.TensorArray(dtype, time_steps,
                                    tensor_array_name="output_array")
-        value_ta = tf.TensorArray(tf.float32, time_steps,
+        value_ta = tf.TensorArray(dtype, time_steps,
                                   tensor_array_name="value_array")
-        alpha_ta = tf.TensorArray(tf.float32, time_steps,
+        alpha_ta = tf.TensorArray(dtype, time_steps,
                                   tensor_array_name="alpha_array")
         input_ta = input_ta.unstack(inputs)
         initial_state = layers.nn.linear(initial_state, output_size, True,
@@ -183,6 +187,7 @@ def _decoder(cell, inputs, memory, sequence_length, initial_state, dtype=None,
 def model_graph(features, mode, params):
     src_vocab_size = len(params.vocabulary["source"])
     tgt_vocab_size = len(params.vocabulary["target"])
+    dtype = tf.get_variable_scope().dtype
 
     with tf.variable_scope("source_embedding"):
         src_emb = tf.get_variable("embedding",
@@ -215,7 +220,7 @@ def model_graph(features, mode, params):
             state_keep_prob=1.0 - params.dropout,
             variational_recurrent=True,
             input_size=params.embedding_size,
-            dtype=tf.float32
+            dtype=dtype
         )
         cell_bw = tf.nn.rnn_cell.DropoutWrapper(
             cell_bw,
@@ -224,11 +229,11 @@ def model_graph(features, mode, params):
             state_keep_prob=1.0 - params.dropout,
             variational_recurrent=True,
             input_size=params.embedding_size,
-            dtype=tf.float32
+            dtype=dtype
         )
 
     encoder_output = _encoder(cell_fw, cell_bw, src_inputs,
-                              features["source_length"])
+                              features["source_length"], dtype=dtype)
 
     # decoder
     cell = layers.rnn_cell.LegacyGRUCell(params.hidden_size)
@@ -242,7 +247,7 @@ def model_graph(features, mode, params):
             variational_recurrent=True,
             # input + context
             input_size=params.embedding_size + 2 * params.hidden_size,
-            dtype=tf.float32
+            dtype=dtype
         )
 
     length = {
@@ -251,7 +256,7 @@ def model_graph(features, mode, params):
     }
     initial_state = encoder_output["final_states"]["backward"]
     decoder_output = _decoder(cell, tgt_inputs, encoder_output["annotation"],
-                              length, initial_state)
+                              length, initial_state, dtype=dtype)
 
     # Shift left
     shifted_tgt_inputs = tf.pad(tgt_inputs, [[0, 0], [1, 0], [0, 0]])
@@ -273,7 +278,7 @@ def model_graph(features, mode, params):
     ]
     maxout_size = params.hidden_size // params.maxnum
 
-    if mode is "infer":
+    if mode == "infer":
         # Special case for non-incremental decoding
         maxout_features = [
             shifted_tgt_inputs[:, -1, :],
@@ -305,7 +310,7 @@ def model_graph(features, mode, params):
     logits = tf.reshape(logits, [-1, tgt_vocab_size])
     labels = features["target"]
 
-    ce = layers.nn.smoothed_softmax_cross_entropy_with_logits(
+    ce = losses.smoothed_softmax_cross_entropy_with_logits(
         logits=logits,
         labels=labels,
         smoothing=params.label_smoothing,
@@ -328,17 +333,21 @@ def model_graph(features, mode, params):
     return loss
 
 
-class RNNsearch(interface.NMTModel):
+class RNNsearch(NMTModel):
 
     def __init__(self, params, scope="rnnsearch"):
         super(RNNsearch, self).__init__(params=params, scope=scope)
 
-    def get_training_func(self, initializer, regularizer=None):
+    def get_training_func(self, initializer, regularizer=None, dtype=None):
         def training_fn(features, params=None, reuse=None):
             if params is None:
                 params = self.parameters
+
+            custom_getter = utils.custom_getter if dtype else None
+
             with tf.variable_scope(self._scope, initializer=initializer,
-                                   regularizer=regularizer, reuse=reuse):
+                                   regularizer=regularizer, reuse=reuse,
+                                   custom_getter=custom_getter, dtype=dtype):
                 loss = model_graph(features, "train", params)
                 return loss
 

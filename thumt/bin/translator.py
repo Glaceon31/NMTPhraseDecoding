@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # coding=utf-8
-# Copyright 2018 The THUMT Authors
+# Copyright 2017-2019 The THUMT Authors
 
 from __future__ import absolute_import
 from __future__ import division
@@ -9,6 +9,8 @@ from __future__ import print_function
 import argparse
 import itertools
 import os
+import six
+import sys
 
 import numpy as np
 import tensorflow as tf
@@ -84,12 +86,12 @@ def default_parameters():
 def merge_parameters(params1, params2):
     params = tf.contrib.training.HParams()
 
-    for (k, v) in params1.values().iteritems():
+    for (k, v) in six.iteritems(params1.values()):
         params.add_hparam(k, v)
 
     params_dict = params.values()
 
-    for (k, v) in params2.values().iteritems():
+    for (k, v) in six.iteritems(params2.values()):
         if k in params_dict:
             # Override
             setattr(params, k, v)
@@ -200,7 +202,7 @@ def shard_features(features, placeholders, predictions):
                 break
 
     if isinstance(predictions, (list, tuple)):
-        predictions = [item[:n] for item in predictions]
+        predictions = predictions[:n]
 
     return predictions, feed_dict
 
@@ -333,13 +335,11 @@ def main(args):
         scores = []
 
         for result in results:
-            for item in result[0]:
-                outputs.append(item.tolist())
-            for item in result[1]:
-                scores.append(item.tolist())
-
-        outputs = list(itertools.chain(*outputs))
-        scores = list(itertools.chain(*scores))
+            for shard in result:
+                for item in shard[0]:
+                    outputs.append(item.tolist())
+                for item in shard[1]:
+                    scores.append(item.tolist())
 
         restored_inputs = []
         restored_outputs = []
@@ -351,27 +351,34 @@ def main(args):
             restored_scores.append(scores[sorted_keys[index]])
 
         # Write to file
-        with open(args.output, "w") as outfile:
-            count = 0
-            for outputs, scores in zip(restored_outputs, restored_scores):
-                for output, score in zip(outputs, scores):
-                    decoded = []
-                    for idx in output:
-                        if idx == params.mapping["target"][params.eos]:
-                            break
-                        decoded.append(vocab[idx])
+        if sys.version_info.major == 2:
+            outfile = open(args.output, "w")
+        elif sys.version_info.major == 3:
+            outfile = open(args.output, "w", encoding="utf-8")
+        else:
+            raise ValueError("Unkown python running environment!")
 
-                    decoded = " ".join(decoded)
+        count = 0
+        for outputs, scores in zip(restored_outputs, restored_scores):
+            for output, score in zip(outputs, scores):
+                decoded = []
+                for idx in output:
+                    if idx == params.mapping["target"][params.eos]:
+                        break
+                    decoded.append(vocab[idx])
 
-                    if not args.verbose:
-                        outfile.write("%s\n" % decoded)
-                    else:
-                        pattern = "%d ||| %s ||| %s ||| %f\n"
-                        source = restored_inputs[count]
-                        values = (count, source, decoded, score)
-                        outfile.write(pattern % values)
+                decoded = " ".join(decoded)
 
-                count += 1
+                if not args.verbose:
+                    outfile.write("%s\n" % decoded)
+                else:
+                    pattern = "%d ||| %s ||| %s ||| %f\n"
+                    source = restored_inputs[count]
+                    values = (count, source, decoded, score)
+                    outfile.write(pattern % values)
+
+            count += 1
+        outfile.close()
 
 
 if __name__ == "__main__":
