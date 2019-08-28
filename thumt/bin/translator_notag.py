@@ -95,10 +95,11 @@ if __name__ == "__main__":
         tags.append(tags_i)
                 
     middle.close()
-    BIN='/data/zjctmp/ACL2019/NMTPhraseDecoding/thumt/bin/translator.py'
-    CODE='/data/zjctmp/ACL2019/NMTPhraseDecoding'
-    MODEL='/data/zjctmp/ACL2019/exp_bad1/model'
-    CMD='PYTHONPATH='+CODE+' CUDA_VISIBLE_DEVICES=3 python '+BIN+' --vocabulary '+MODEL+'/vocab.zh.txt '+MODEL+'/vocab.en.txt --model transformer --checkpoint '+MODEL+'/model.ckpt-23000 --input tmpprocess.in --output tmpprocess.out'
+    ROOT='/data/zjctmp/AAAI2019_lexcons'
+    CODE=ROOT+'/NMTPhraseDecoding'
+    BIN=CODE+'/thumt/bin/translator.py'
+    MODEL=ROOT+'/model_thumt'
+    CMD='PYTHONPATH='+CODE+' CUDA_VISIBLE_DEVICES=5 python '+BIN+' --vocabulary '+MODEL+'/vocab.src.txt '+MODEL+'/vocab.trg.txt --model transformer --checkpoint '+MODEL+'/model.ckpt-43000 --input tmpprocess.in --output tmpprocess.out --parameters shared_embedding_and_softmax_weights=true,layer_preprocess=layer_norm,layer_postprocess=none'
     print(CMD)
     os.system(CMD)
 
